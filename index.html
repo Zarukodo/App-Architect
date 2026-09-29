@@ -191,10 +191,13 @@
       return newNodes;
     };
 
-    const getBezierPath = (startX, startY, endX, endY) => {
+    const getBezierPath = (startX, startY, endX, endY, isBackward = false) => {
       const deltaY = Math.abs(endY - startY);
       const controlOffset = Math.max(deltaY / 2, 40);
-      return `M ${startX},${startY} C ${startX},${startY + controlOffset} ${endX},${endY - controlOffset} ${endX},${endY}`;
+      // 如果是反向線 (下往上拉)，控制點要往反方向推，曲線才會漂亮
+      const cp1Y = isBackward ? startY - controlOffset : startY + controlOffset;
+      const cp2Y = isBackward ? endY + controlOffset : endY - controlOffset;
+      return `M ${startX},${startY} C ${startX},${cp1Y} ${endX},${cp2Y} ${endX},${endY}`;
     };
 
     function AppArchitect() {
@@ -361,14 +364,14 @@
 
       const handleAutoLayout = () => {
         const targets = new Set(edges.map(e => e.target));
-        const roots = nodes.filter(n => !targets.has(n.id)); 
+        // 防呆：如果網域內產生迴圈，會找不到 root。改為優先找無人指向的，其次找起點，再沒有就抓第一個
+        let roots = nodes.filter(n => !targets.has(n.id));
+        if (roots.length === 0) roots = nodes.filter(n => n.data.nodeType === 'terminal');
+        if (roots.length === 0 && nodes.length > 0) roots = [nodes[0]];
         
         const levels = {};
         const visited = new Set();
-        
-        const queue = roots.length > 0 
-          ? roots.map(r => ({ id: r.id, level: 0 })) 
-          : (nodes.length > 0 ? [{ id: nodes[0].id, level: 0 }] : []);
+        const queue = roots.map(r => ({ id: r.id, level: 0 }));
         
         while (queue.length > 0) {
           const curr = queue.shift();
@@ -384,6 +387,7 @@
           }
         }
         
+        // 處理沒有連線的孤兒節點
         nodes.forEach(n => {
           if (!visited.has(n.id)) {
             if (!levels[0]) levels[0] = [];
@@ -392,23 +396,30 @@
           }
         });
 
-        const nodeSpacingWidth = 250; 
-        const nodeSpacingHeight = 150; 
+        const nodeSpacingWidth = NODE_WIDTH + 80;  // 加大左右間距
+        const nodeSpacingHeight = NODE_HEIGHT + 120; // 加大上下間距
+        const centerX = 500; // 視窗中心基準
         
-        const newNodes = nodes.map(node => {
-          let targetLevel = 0, targetIndex = 0;
-          Object.keys(levels).forEach(level => {
-            const idx = levels[level].indexOf(node.id);
-            if (idx !== -1) {
-              targetLevel = parseInt(level);
-              targetIndex = idx;
+        const newNodes = [...nodes];
+        Object.keys(levels).forEach(levelStr => {
+          const level = parseInt(levelStr);
+          const levelNodes = levels[levelStr];
+          
+          // 計算這層總寬度，確保每一層都水平置中展開
+          const totalWidth = levelNodes.length * nodeSpacingWidth - 80;
+          let startX = centerX - (totalWidth / 2);
+
+          levelNodes.forEach((nodeId) => {
+            const nodeIndex = newNodes.findIndex(n => n.id === nodeId);
+            if (nodeIndex !== -1) {
+              newNodes[nodeIndex] = {
+                ...newNodes[nodeIndex],
+                x: startX,
+                y: level * nodeSpacingHeight + 80
+              };
             }
+            startX += nodeSpacingWidth;
           });
-          return {
-            ...node,
-            x: targetIndex * nodeSpacingWidth + 50,
-            y: targetLevel * nodeSpacingHeight + 50
-          };
         });
 
         setNodes(newNodes);
@@ -523,28 +534,22 @@
         setContextMenu(null);
       };
 
-      const onPortMouseDown = (e, nodeId, isSource) => {
+      const onPortMouseDown = (e, nodeId, position) => {
         e.stopPropagation();
-        if (mode === 'view' || !isSource) return;
+        if (mode === 'view') return;
         
         const node = nodes.find(n => n.id === nodeId);
         const startX = node.x + NODE_WIDTH / 2;
-        const startY = node.y + NODE_HEIGHT + 15;
+        // 依照點擊的是上面還是下面，決定線的起始點
+        const startY = position === 'top' ? node.y - 15 : node.y + NODE_HEIGHT + 15;
         
-        setDrawingEdge({
-          source: nodeId,
-          startX,
-          startY,
-          currentX: startX,
-          currentY: startY
-        });
+        setDrawingEdge({ source: nodeId, startX, startY, currentX: startX, currentY: startY });
       };
 
-      const onPortMouseUp = (e, nodeId, isTarget) => {
+      const onPortMouseUp = (e, nodeId, position) => {
         if (!drawingEdge) return;
-        
         e.stopPropagation();
-        if (mode === 'view' || !isTarget) {
+        if (mode === 'view') {
           setDrawingEdge(null);
           return;
         }
@@ -552,11 +557,7 @@
         if (drawingEdge.source !== nodeId) {
           const edgeExists = edges.some(edge => edge.source === drawingEdge.source && edge.target === nodeId);
           if (!edgeExists) {
-            const newEdges = [...edges, {
-              id: `edge_${Date.now()}`,
-              source: drawingEdge.source,
-              target: nodeId
-            }];
+            const newEdges = [...edges, { id: `edge_${Date.now()}`, source: drawingEdge.source, target: nodeId }];
             setEdges(newEdges);
             syncToCloud(nodes, newEdges);
           }
@@ -843,7 +844,7 @@
                     const sourceNode = nodes.find(n => n.id === edge.source);
                     const targetNode = nodes.find(n => n.id === edge.target);
                     if (!sourceNode || !targetNode) return null;
-                    
+                    const isBackward = sourceNode.y > targetNode.y;
                     const startX = sourceNode.x + NODE_WIDTH / 2;
                     const startY = sourceNode.y + NODE_HEIGHT + 15;
                     const endX = targetNode.x + NODE_WIDTH / 2;
@@ -865,7 +866,7 @@
                   
                   {drawingEdge && (
                     <path 
-                      d={getBezierPath(drawingEdge.startX, drawingEdge.startY, drawingEdge.currentX, drawingEdge.currentY)}
+                      d={getBezierPath(drawingEdge.startX, drawingEdge.startY, drawingEdge.currentX, drawingEdge.currentY, drawingEdge.startY > drawingEdge.currentY)}
                       fill="none"
                       stroke="#3b82f6"
                       strokeWidth="2"
@@ -884,7 +885,7 @@
                   const sourceNode = nodes.find(n => n.id === edge.source);
                   const targetNode = nodes.find(n => n.id === edge.target);
                   if (!sourceNode || !targetNode) return null;
-
+                  const isBackward = sourceNode.y > targetNode.y;
                   const startX = sourceNode.x + NODE_WIDTH / 2;
                   const startY = sourceNode.y + NODE_HEIGHT + 15;
                   const endX = targetNode.x + NODE_WIDTH / 2;
@@ -936,7 +937,8 @@
                       
                       <div 
                         className={`absolute -top-3 left-1/2 -translate-x-1/2 w-4 h-4 bg-gray-300 border-2 border-white rounded-full ${mode === 'edit' ? 'hover:bg-blue-500 hover:scale-125 cursor-crosshair' : 'hidden'} transition-all z-20`}
-                        onMouseUp={(e) => onPortMouseUp(e, node.id, true)}
+                        onMouseDown={(e) => onPortMouseDown(e, node.id, 'top')}
+                        onMouseUp={(e) => onPortMouseUp(e, node.id, 'top')}
                       />
 
                       <div className={`absolute inset-0 flex items-center justify-center px-4 pointer-events-none ${nodeDef.contentClass || ''}`}>
@@ -948,7 +950,8 @@
 
                       <div 
                         className={`absolute -bottom-3 left-1/2 -translate-x-1/2 w-4 h-4 bg-gray-300 border-2 border-white rounded-full ${mode === 'edit' ? 'hover:bg-blue-500 hover:scale-125 cursor-crosshair' : 'hidden'} transition-all z-20`}
-                        onMouseDown={(e) => onPortMouseDown(e, node.id, true)}
+                        onMouseDown={(e) => onPortMouseDown(e, node.id, 'bottom')}
+                        onMouseUp={(e) => onPortMouseUp(e, node.id, 'bottom')}
                       />
 
                       {node.data.description && (
