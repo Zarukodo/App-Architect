@@ -18,6 +18,11 @@
   <!-- Babel for in-browser JSX compilation -->
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html-to-image/1.11.11/html-to-image.min.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
+
   <style>
     body {
       margin: 0;
@@ -187,6 +192,56 @@
     };
 
     function AppArchitect() {
+      // 1. 抓取網址參數作為房間 ID
+      const urlParams = new URLSearchParams(window.location.search);
+      const initialRoom = urlParams.get('room') || 'default_room';
+      const [currentRoom, setCurrentRoom] = useState(initialRoom);
+
+      // 2. 雲端更新函式改成動態房號
+      const syncToCloud = useCallback((newNodes, newEdges) => {
+        const user = firebase.auth().currentUser;
+        if (user) {
+          firebase.database().ref(`architect_rooms/${currentRoom}`).set({
+            nodes: newNodes || [],
+            edges: newEdges || []
+          }).catch(err => console.error("同步失敗:", err));
+        }
+      }, [currentRoom]);
+
+      // 3. 監聽 Firebase 的位置也改成動態房號
+      useEffect(() => {
+        if (!firebase.apps.length) {
+          // 請確保這裡是你的 Firebase Config
+          firebase.initializeApp({
+            apiKey: "AIzaSyA5ZVJ1-AF9AMYJQJxCAveKgjb0ZvaJC3k",
+            authDomain: "device-streaming-3669a5cf.firebaseapp.com",
+            databaseURL: "https://device-streaming-3669a5cf-default-rtdb.asia-southeast1.firebasedatabase.app",
+            projectId: "device-streaming-3669a5cf",
+          });
+        }
+        
+        firebase.auth().signInAnonymously()
+          .then(() => {
+            const db = firebase.database();
+            const roomRef = db.ref(`architect_rooms/${currentRoom}`);
+
+            roomRef.on('value', (snapshot) => {
+              const data = snapshot.val();
+              if (data) {
+                setNodes(prev => JSON.stringify(prev) !== JSON.stringify(data.nodes || []) ? (data.nodes || []) : prev);
+                setEdges(prev => JSON.stringify(prev) !== JSON.stringify(data.edges || []) ? (data.edges || []) : prev);
+              } else {
+                // 如果進到新房間是空的，就清空本地畫布
+                setNodes([]);
+                setEdges([]);
+              }
+            });
+            
+            return () => roomRef.off();
+          })
+          .catch((error) => console.error("登入失敗:", error));
+      }, [currentRoom]);
+
       // App States
       const [lang, setLang] = useState('zh');
       const [nodes, setNodes] = useState([]);
@@ -218,12 +273,29 @@
         setTimeout(() => setToastMessage(null), 3000);
       };
 
+      const handleChangeRoom = () => {
+        const newRoom = prompt(lang === 'zh' ? '請輸入要加入或建立的房間名稱 (英文或數字)：' : 'Enter room name:', currentRoom);
+        if (newRoom && newRoom.trim() !== '' && newRoom !== currentRoom) {
+           // 直接更改網址並重新載入，最乾淨的做法
+           window.location.href = `?room=${newRoom.trim()}`;
+        }
+      };
+
+      const copyRoomLink = () => {
+        const url = new URL(window.location.href);
+        url.searchParams.set('room', currentRoom);
+        navigator.clipboard.writeText(url.toString());
+        showToast(lang === 'zh' ? '已複製房間連結！傳給朋友加入吧。' : 'Room link copied!');
+      };
+
       useEffect(() => {
         if (layoutMode === 'tree' && nodes.length > 0) {
-          setNodes(prev => calculateTreeLayout(prev, edges));
+          const newNodes = calculateTreeLayout(nodes, edges);
+          setNodes(newNodes);
           setTransform({ x: 0, y: 0, scale: 1 });
+          syncToCloud(newNodes, edges); // 自動整理完也推上雲端
         }
-      }, [layoutMode, edges]);
+      }, [layoutMode, edges, syncToCloud]);
 
       const getCanvasCoords = (e) => {
         const rect = canvasRef.current.getBoundingClientRect();
@@ -263,6 +335,10 @@
 
       const onCanvasMouseUp = () => {
         setIsPanning(false);
+        // 如果有拖曳節點，放開滑鼠時同步到雲端
+        if (draggingNode) {
+            syncToCloud(nodes, edges);
+        }
         setDraggingNode(null);
         setDrawingEdge(null);
       };
@@ -349,6 +425,7 @@
         setNodes(newNodes);
         setTransform({ x: 0, y: 0, scale: 1 }); // 視角歸零
         showToast(t.layoutOrganized);
+        syncToCloud(newNodes, edges); // 自動整理完也推上雲端
       };
 
       const onNodeMouseDown = (e, node) => {
@@ -411,11 +488,13 @@
         if (drawingEdge.source !== nodeId) {
           const edgeExists = edges.some(edge => edge.source === drawingEdge.source && edge.target === nodeId);
           if (!edgeExists) {
-            setEdges(prev => [...prev, {
+            const newEdges = [...edges, {
               id: `edge_${Date.now()}`,
               source: drawingEdge.source,
               target: nodeId
-            }]);
+            }];
+            setEdges(newEdges);
+            syncToCloud(nodes, newEdges); // 新增連線後同步
           }
         }
         setDrawingEdge(null);
@@ -447,24 +526,33 @@
           }
         };
 
-        setNodes(nds => [...nds, newNode]);
+        const newNodes = [...nodes, newNode];
+        setNodes(newNodes);
+        syncToCloud(newNodes, edges); // 新增節點後同步
       };
 
       // 修復刪除邏輯
       const deleteNode = () => {
         if (!contextMenu) return;
-        setNodes(nds => nds.filter(node => node.id !== contextMenu.id));
-        setEdges(eds => eds.filter(edge => edge.source !== contextMenu.id && edge.target !== contextMenu.id));
+        const newNodes = nodes.filter(node => node.id !== contextMenu.id);
+        const newEdges = edges.filter(edge => edge.source !== contextMenu.id && edge.target !== contextMenu.id);
+        setNodes(newNodes);
+        setEdges(newEdges);
         if (selectedNodeId === contextMenu.id) setSelectedNodeId(null);
         setContextMenu(null); // 清除選單
+        syncToCloud(newNodes, newEdges); // 刪除後同步
       };
 
       const updateNodeData = (id, field, value) => {
-        setNodes(nds => nds.map(node => node.id === id ? { ...node, data: { ...node.data, [field]: value } } : node));
+        const newNodes = nodes.map(node => node.id === id ? { ...node, data: { ...node.data, [field]: value } } : node);
+        setNodes(newNodes);
+        syncToCloud(newNodes, edges); // 更新資料後同步
       };
 
       const updateEdgeLabel = (id, label) => {
-        setEdges(eds => eds.map(edge => edge.id === id ? { ...edge, label } : edge));
+        const newEdges = edges.map(edge => edge.id === id ? { ...edge, label } : edge);
+        setEdges(newEdges);
+        syncToCloud(nodes, newEdges); // 更新連線標籤後同步
       };
 
       const handleExport = () => {
@@ -480,6 +568,60 @@
         showToast(t.exportSuccess);
       };
 
+      const handleExportImage = () => {
+        if (!canvasRef.current || nodes.length === 0) {
+          showToast(lang === 'zh' ? '畫布是空的，沒東西可以匯出啦！' : 'Canvas is empty!');
+          return;
+        }
+        
+        showToast(lang === 'zh' ? '圖片生成中，請稍候...' : 'Generating image...');
+        
+        // 1. 找出所有節點的邊界 (Bounding Box)，免得有節點在螢幕外被切掉
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        nodes.forEach(n => {
+          if (n.x < minX) minX = n.x;
+          if (n.y < minY) minY = n.y;
+          if (n.x + NODE_WIDTH > maxX) maxX = n.x + NODE_WIDTH;
+          if (n.y + NODE_HEIGHT > maxY) maxY = n.y + NODE_HEIGHT;
+        });
+
+        // 加上一點美觀的邊距 (Padding)
+        const padding = 100;
+        minX -= padding;
+        minY -= padding;
+        maxX += padding;
+        maxY += padding;
+        const exportWidth = maxX - minX;
+        const exportHeight = maxY - minY;
+
+        // 2. 鎖定我們要截圖的「變形圖層」
+        const targetEl = canvasRef.current.querySelector('.origin-top-left');
+
+        // 3. 呼叫 htmlToImage，並利用 style 參數在背景覆寫樣式 (不會影響你的真實畫面)
+        htmlToImage.toPng(targetEl, {
+          backgroundColor: '#fafafa',
+          width: exportWidth,
+          height: exportHeight,
+          pixelRatio: 2, // 給你兩倍高畫質
+          style: {
+            // 最神奇的一步：強制把縮放歸零，並把畫布的最左上角對齊到 (0,0)
+            transform: `translate(${-minX}px, ${-minY}px) scale(1)`,
+            transformOrigin: 'top left'
+          }
+        }).then((url) => {
+          const link = document.createElement('a');
+          link.download = 'app-architecture.png';
+          link.href = url;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          showToast(lang === 'zh' ? '圖片匯出成功！' : 'Image exported successfully!');
+        }).catch((error) => {
+          console.error("截圖失敗：", error);
+          showToast(lang === 'zh' ? '圖片匯出發生錯誤' : 'Failed to export image');
+        });
+      };
+
       const handleImport = (event) => {
         const file = event.target.files[0];
         if (!file) return;
@@ -493,6 +635,7 @@
               setEdges(parsed.edges);
               setTransform({ x: 0, y: 0, scale: 1 });
               showToast(t.importSuccess);
+              syncToCloud(parsed.nodes, parsed.edges); // 匯入後同步到雲端
             } else {
               showToast(t.importInvalid);
             }
@@ -519,6 +662,22 @@
             </div>
 
             <div className="flex items-center space-x-4">
+              {/* === 這裡是你新增的房間UI === */}
+              <div className="flex items-center bg-blue-50 text-blue-700 px-3 py-1.5 rounded-lg border border-blue-200 shadow-inner">
+                <span className="text-sm font-bold mr-3 tracking-wide">
+                  <i className="fa-solid fa-house-user mr-1.5"></i>
+                  {currentRoom}
+                </span>
+                <div className="w-px h-4 bg-blue-200 mx-2"></div>
+                <button onClick={copyRoomLink} title={lang === 'zh' ? '複製房間連結' : 'Copy Room Link'} className="w-6 h-6 flex items-center justify-center hover:bg-blue-200 rounded transition-colors mr-1">
+                  <i className="fa-solid fa-link text-xs"></i>
+                </button>
+                <button onClick={handleChangeRoom} title={lang === 'zh' ? '切換房間' : 'Change Room'} className="w-6 h-6 flex items-center justify-center hover:bg-blue-200 rounded transition-colors">
+                  <i className="fa-solid fa-door-open text-xs"></i>
+                </button>
+              </div>
+              <div className="w-px h-6 bg-gray-300 mx-2"></div>
+              {/* ======================= */}
               {/* Language Toggle */}
               <button
                 onClick={() => setLang(lang === 'zh' ? 'en' : 'zh')}
@@ -576,7 +735,10 @@
 
               {/* Export / Import */}
               <button onClick={handleExport} className="flex items-center px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
-                <i className="fa-solid fa-download mr-2"></i> {t.export}
+                <i className="fa-solid fa-file-code mr-2"></i> {lang === 'zh' ? '匯出 JSON' : 'Export JSON'}
+              </button>
+              <button onClick={handleExportImage} className="flex items-center px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
+                <i className="fa-solid fa-image mr-2"></i> {lang === 'zh' ? '匯出圖片' : 'Export Image'}
               </button>
               <button onClick={() => fileInputRef.current?.click()} className="flex items-center px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
                 <i className="fa-solid fa-upload mr-2"></i> {t.import}
