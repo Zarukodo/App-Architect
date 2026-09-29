@@ -79,7 +79,11 @@
         page: '頁面 / 畫面',
         group: '功能模組',
         sticky: '便利貼',
-        edgeLabel: '連線說明...'
+        edgeLabel: '連線說明...',
+        copy: '複製',
+        cut: '剪下',
+        paste: '貼上',
+        delete: '刪除'
       },
       en: {
         title: 'App Architect',
@@ -108,7 +112,11 @@
         page: 'Page / Screen',
         group: 'Feature Group',
         sticky: 'Sticky Note',
-        edgeLabel: 'Edge label...'
+        edgeLabel: 'Edge label...',
+        copy: 'Copy',
+        cut: 'Cut',
+        paste: 'Paste',
+        delete: 'Delete'
       }
     };
 
@@ -126,9 +134,8 @@
     };
 
     const NODE_WIDTH = 180;
-    const NODE_HEIGHT = 60; // Approximate height for bounding box
+    const NODE_HEIGHT = 60;
 
-    // Simple Tree Layout Algorithm for Mode Toggle
     const calculateTreeLayout = (nodes, edges) => {
       if (nodes.length === 0) return nodes;
 
@@ -151,7 +158,7 @@
       if (roots.length > 0) {
         roots.forEach(r => assignLevel(r.id, 0));
       } else {
-        assignLevel(nodes[0].id, 0); // Fallback for cycles
+        assignLevel(nodes[0].id, 0);
       }
 
       nodes.forEach(n => {
@@ -166,7 +173,7 @@
         const level = parseInt(levelStr);
         const levelNodes = levels[levelStr];
         const totalWidth = levelNodes.length * NODE_WIDTH + (levelNodes.length - 1) * SPACING;
-        let startX = -totalWidth / 2 + NODE_WIDTH / 2 + 400; // 400 is arbitrary center offset
+        let startX = -totalWidth / 2 + NODE_WIDTH / 2 + 400;
 
         levelNodes.forEach(nodeId => {
           const nodeIndex = newNodes.findIndex(n => n.id === nodeId);
@@ -184,7 +191,6 @@
       return newNodes;
     };
 
-    // Generate SVG path for a smooth bezier curve between nodes
     const getBezierPath = (startX, startY, endX, endY) => {
       const deltaY = Math.abs(endY - startY);
       const controlOffset = Math.max(deltaY / 2, 40);
@@ -192,12 +198,10 @@
     };
 
     function AppArchitect() {
-      // 1. 抓取網址參數作為房間 ID
       const urlParams = new URLSearchParams(window.location.search);
       const initialRoom = urlParams.get('room') || 'default_room';
       const [currentRoom, setCurrentRoom] = useState(initialRoom);
 
-      // 2. 雲端更新函式改成動態房號
       const syncToCloud = useCallback((newNodes, newEdges) => {
         const user = firebase.auth().currentUser;
         if (user) {
@@ -208,10 +212,8 @@
         }
       }, [currentRoom]);
 
-      // 3. 監聽 Firebase 的位置也改成動態房號
       useEffect(() => {
         if (!firebase.apps.length) {
-          // 請確保這裡是你的 Firebase Config
           firebase.initializeApp({
             apiKey: "AIzaSyA5ZVJ1-AF9AMYJQJxCAveKgjb0ZvaJC3k",
             authDomain: "device-streaming-3669a5cf.firebaseapp.com",
@@ -231,7 +233,6 @@
                 setNodes(prev => JSON.stringify(prev) !== JSON.stringify(data.nodes || []) ? (data.nodes || []) : prev);
                 setEdges(prev => JSON.stringify(prev) !== JSON.stringify(data.edges || []) ? (data.edges || []) : prev);
               } else {
-                // 如果進到新房間是空的，就清空本地畫布
                 setNodes([]);
                 setEdges([]);
               }
@@ -242,24 +243,21 @@
           .catch((error) => console.error("登入失敗:", error));
       }, [currentRoom]);
 
-      // App States
       const [lang, setLang] = useState('zh');
       const [nodes, setNodes] = useState([]);
       const [edges, setEdges] = useState([]);
-      const [mode, setMode] = useState('edit'); // 'edit' or 'view'
-      const [layoutMode, setLayoutMode] = useState('flow'); // 'flow' or 'tree'
+      const [mode, setMode] = useState('edit');
+      const [layoutMode, setLayoutMode] = useState('flow');
       
-      // Interaction States
       const [selectedNodeId, setSelectedNodeId] = useState(null);
       const [contextMenu, setContextMenu] = useState(null);
+      const [clipboard, setClipboard] = useState(null); 
       const [toastMessage, setToastMessage] = useState(null);
       
-      // Canvas Transform State (Pan & Zoom)
       const [transform, setTransform] = useState({ x: 0, y: 0, scale: 1 });
       const canvasRef = useRef(null);
       const fileInputRef = useRef(null);
 
-      // Dragging States
       const [isPanning, setIsPanning] = useState(false);
       const [panStart, setPanStart] = useState({ x: 0, y: 0 });
       const [draggingNode, setDraggingNode] = useState(null);
@@ -276,7 +274,6 @@
       const handleChangeRoom = () => {
         const newRoom = prompt(lang === 'zh' ? '請輸入要加入或建立的房間名稱 (英文或數字)：' : 'Enter room name:', currentRoom);
         if (newRoom && newRoom.trim() !== '' && newRoom !== currentRoom) {
-           // 直接更改網址並重新載入，最乾淨的做法
            window.location.href = `?room=${newRoom.trim()}`;
         }
       };
@@ -293,7 +290,7 @@
           const newNodes = calculateTreeLayout(nodes, edges);
           setNodes(newNodes);
           setTransform({ x: 0, y: 0, scale: 1 });
-          syncToCloud(newNodes, edges); // 自動整理完也推上雲端
+          syncToCloud(newNodes, edges);
         }
       }, [layoutMode, edges, syncToCloud]);
 
@@ -335,7 +332,6 @@
 
       const onCanvasMouseUp = () => {
         setIsPanning(false);
-        // 如果有拖曳節點，放開滑鼠時同步到雲端
         if (draggingNode) {
             syncToCloud(nodes, edges);
         }
@@ -343,30 +339,26 @@
         setDrawingEdge(null);
       };
 
-      // Alt + 滾輪縮放邏輯整併
       const onCanvasWheel = (e) => {
         if (e.altKey) {
           e.preventDefault();
           const scaleAdjustment = e.deltaY > 0 ? 0.9 : 1.1;
           let newScale = transform.scale * scaleAdjustment;
-          newScale = Math.min(Math.max(0.2, newScale), 3); // 限制縮放比例 0.2 ~ 3.0
+          newScale = Math.min(Math.max(0.2, newScale), 3);
           
           const rect = canvasRef.current.getBoundingClientRect();
           const mouseX = e.clientX - rect.left;
           const mouseY = e.clientY - rect.top;
           
-          // 計算縮放後的相對座標偏移
           const newX = mouseX - (mouseX - transform.x) * (newScale / transform.scale);
           const newY = mouseY - (mouseY - transform.y) * (newScale / transform.scale);
 
           setTransform({ x: newX, y: newY, scale: newScale });
         } else {
-          // 未按 Alt 鍵時，維持原生的滑鼠滾輪平移效果
           setTransform(prev => ({ ...prev, x: prev.x - e.deltaX, y: prev.y - e.deltaY }));
         }
       };
 
-      // 一鍵整理神仙按鈕邏輯
       const handleAutoLayout = () => {
         const targets = new Set(edges.map(e => e.target));
         const roots = nodes.filter(n => !targets.has(n.id)); 
@@ -374,12 +366,10 @@
         const levels = {};
         const visited = new Set();
         
-        // 如果沒有源頭（可能是循環或空），就抓第一個當源頭
         const queue = roots.length > 0 
           ? roots.map(r => ({ id: r.id, level: 0 })) 
           : (nodes.length > 0 ? [{ id: nodes[0].id, level: 0 }] : []);
         
-        // BFS 尋找階層
         while (queue.length > 0) {
           const curr = queue.shift();
           if (!visited.has(curr.id)) {
@@ -394,7 +384,6 @@
           }
         }
         
-        // 處理沒有連線的邊緣節點
         nodes.forEach(n => {
           if (!visited.has(n.id)) {
             if (!levels[0]) levels[0] = [];
@@ -423,9 +412,23 @@
         });
 
         setNodes(newNodes);
-        setTransform({ x: 0, y: 0, scale: 1 }); // 視角歸零
+        setTransform({ x: 0, y: 0, scale: 1 });
         showToast(t.layoutOrganized);
-        syncToCloud(newNodes, edges); // 自動整理完也推上雲端
+        syncToCloud(newNodes, edges);
+      };
+
+      const onCanvasContextMenu = (e) => {
+        e.preventDefault();
+        if (mode === 'view') return;
+        const rect = canvasRef.current.getBoundingClientRect();
+        const coords = getCanvasCoords(e);
+        setContextMenu({
+          type: 'canvas',
+          top: e.clientY - rect.top,
+          left: e.clientX - rect.left,
+          dropX: coords.x,
+          dropY: coords.y
+        });
       };
 
       const onNodeMouseDown = (e, node) => {
@@ -449,13 +452,75 @@
         e.preventDefault();
         e.stopPropagation();
         if (mode === 'view') return;
-        
         const rect = canvasRef.current.getBoundingClientRect();
         setContextMenu({
+          type: 'node',
           id: node.id,
           top: e.clientY - rect.top,
           left: e.clientX - rect.left,
         });
+      };
+
+      const onEdgeContextMenu = (e, edge) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (mode === 'view') return;
+        const rect = canvasRef.current.getBoundingClientRect();
+        setContextMenu({
+          type: 'edge',
+          id: edge.id,
+          top: e.clientY - rect.top,
+          left: e.clientX - rect.left,
+        });
+      };
+
+      const handleContextMenuAction = (action) => {
+        if (!contextMenu) return;
+
+        if (action === 'delete') {
+          if (contextMenu.type === 'node') {
+            const newNodes = nodes.filter(node => node.id !== contextMenu.id);
+            const newEdges = edges.filter(edge => edge.source !== contextMenu.id && edge.target !== contextMenu.id);
+            setNodes(newNodes);
+            setEdges(newEdges);
+            if (selectedNodeId === contextMenu.id) setSelectedNodeId(null);
+            syncToCloud(newNodes, newEdges);
+          } else if (contextMenu.type === 'edge') {
+            const newEdges = edges.filter(edge => edge.id !== contextMenu.id);
+            setEdges(newEdges);
+            syncToCloud(nodes, newEdges);
+          }
+        } 
+        else if (action === 'copy' || action === 'cut') {
+          const targetNode = nodes.find(n => n.id === contextMenu.id);
+          if (targetNode) {
+            setClipboard({ action, node: JSON.parse(JSON.stringify(targetNode)) });
+            if (action === 'cut') {
+              const newNodes = nodes.filter(node => node.id !== contextMenu.id);
+              const newEdges = edges.filter(edge => edge.source !== contextMenu.id && edge.target !== contextMenu.id);
+              setNodes(newNodes);
+              setEdges(newEdges);
+              if (selectedNodeId === contextMenu.id) setSelectedNodeId(null);
+              syncToCloud(newNodes, newEdges);
+            }
+          }
+        } 
+        else if (action === 'paste') {
+          if (!clipboard) return;
+          const newNode = {
+            ...clipboard.node,
+            id: `node_${Date.now()}`,
+            x: contextMenu.dropX - NODE_WIDTH / 2,
+            y: contextMenu.dropY - NODE_HEIGHT / 2,
+          };
+          const newNodes = [...nodes, newNode];
+          setNodes(newNodes);
+          syncToCloud(newNodes, edges);
+          
+          if (clipboard.action === 'cut') setClipboard(null); 
+        }
+        
+        setContextMenu(null);
       };
 
       const onPortMouseDown = (e, nodeId, isSource) => {
@@ -476,7 +541,6 @@
       };
 
       const onPortMouseUp = (e, nodeId, isTarget) => {
-        // 解法防呆：如果沒有在畫線，就不攔截事件，直接交給外層 Canvas 處理
         if (!drawingEdge) return;
         
         e.stopPropagation();
@@ -494,7 +558,7 @@
               target: nodeId
             }];
             setEdges(newEdges);
-            syncToCloud(nodes, newEdges); // 新增連線後同步
+            syncToCloud(nodes, newEdges);
           }
         }
         setDrawingEdge(null);
@@ -528,31 +592,19 @@
 
         const newNodes = [...nodes, newNode];
         setNodes(newNodes);
-        syncToCloud(newNodes, edges); // 新增節點後同步
-      };
-
-      // 修復刪除邏輯
-      const deleteNode = () => {
-        if (!contextMenu) return;
-        const newNodes = nodes.filter(node => node.id !== contextMenu.id);
-        const newEdges = edges.filter(edge => edge.source !== contextMenu.id && edge.target !== contextMenu.id);
-        setNodes(newNodes);
-        setEdges(newEdges);
-        if (selectedNodeId === contextMenu.id) setSelectedNodeId(null);
-        setContextMenu(null); // 清除選單
-        syncToCloud(newNodes, newEdges); // 刪除後同步
+        syncToCloud(newNodes, edges);
       };
 
       const updateNodeData = (id, field, value) => {
         const newNodes = nodes.map(node => node.id === id ? { ...node, data: { ...node.data, [field]: value } } : node);
         setNodes(newNodes);
-        syncToCloud(newNodes, edges); // 更新資料後同步
+        syncToCloud(newNodes, edges);
       };
 
       const updateEdgeLabel = (id, label) => {
         const newEdges = edges.map(edge => edge.id === id ? { ...edge, label } : edge);
         setEdges(newEdges);
-        syncToCloud(nodes, newEdges); // 更新連線標籤後同步
+        syncToCloud(nodes, newEdges);
       };
 
       const handleExport = () => {
@@ -576,7 +628,6 @@
         
         showToast(lang === 'zh' ? '圖片生成中，請稍候...' : 'Generating image...');
         
-        // 1. 找出所有節點的邊界 (Bounding Box)，免得有節點在螢幕外被切掉
         let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
         nodes.forEach(n => {
           if (n.x < minX) minX = n.x;
@@ -585,7 +636,6 @@
           if (n.y + NODE_HEIGHT > maxY) maxY = n.y + NODE_HEIGHT;
         });
 
-        // 加上一點美觀的邊距 (Padding)
         const padding = 100;
         minX -= padding;
         minY -= padding;
@@ -594,17 +644,14 @@
         const exportWidth = maxX - minX;
         const exportHeight = maxY - minY;
 
-        // 2. 鎖定我們要截圖的「變形圖層」
         const targetEl = canvasRef.current.querySelector('.origin-top-left');
 
-        // 3. 呼叫 htmlToImage，並利用 style 參數在背景覆寫樣式 (不會影響你的真實畫面)
         htmlToImage.toPng(targetEl, {
           backgroundColor: '#fafafa',
           width: exportWidth,
           height: exportHeight,
-          pixelRatio: 2, // 給你兩倍高畫質
+          pixelRatio: 2,
           style: {
-            // 最神奇的一步：強制把縮放歸零，並把畫布的最左上角對齊到 (0,0)
             transform: `translate(${-minX}px, ${-minY}px) scale(1)`,
             transformOrigin: 'top left'
           }
@@ -635,7 +682,7 @@
               setEdges(parsed.edges);
               setTransform({ x: 0, y: 0, scale: 1 });
               showToast(t.importSuccess);
-              syncToCloud(parsed.nodes, parsed.edges); // 匯入後同步到雲端
+              syncToCloud(parsed.nodes, parsed.edges);
             } else {
               showToast(t.importInvalid);
             }
@@ -652,7 +699,6 @@
       return (
         <div className="flex flex-col h-screen w-full bg-gray-50 text-gray-800 font-sans overflow-hidden">
           
-          {/* Top Navigation Bar */}
           <header className="flex items-center justify-between px-6 py-3 bg-white border-b border-gray-200 shadow-sm z-20">
             <div className="flex items-center space-x-3">
               <div className="p-2 bg-blue-600 text-white rounded-lg flex items-center justify-center w-8 h-8">
@@ -662,7 +708,6 @@
             </div>
 
             <div className="flex items-center space-x-4">
-              {/* === 這裡是你新增的房間UI === */}
               <div className="flex items-center bg-blue-50 text-blue-700 px-3 py-1.5 rounded-lg border border-blue-200 shadow-inner">
                 <span className="text-sm font-bold mr-3 tracking-wide">
                   <i className="fa-solid fa-house-user mr-1.5"></i>
@@ -677,8 +722,7 @@
                 </button>
               </div>
               <div className="w-px h-6 bg-gray-300 mx-2"></div>
-              {/* ======================= */}
-              {/* Language Toggle */}
+              
               <button
                 onClick={() => setLang(lang === 'zh' ? 'en' : 'zh')}
                 className="px-3 py-1 text-sm font-bold text-gray-500 hover:text-gray-800 transition-colors bg-gray-100 rounded-md border border-gray-200"
@@ -687,7 +731,6 @@
               </button>
               <div className="w-px h-6 bg-gray-300 mx-2"></div>
 
-              {/* Mode Toggle */}
               <div className="flex bg-gray-100 p-1 rounded-lg border border-gray-200">
                 <button
                   onClick={() => setMode('edit')}
@@ -705,7 +748,6 @@
 
               <div className="w-px h-6 bg-gray-300 mx-2"></div>
 
-              {/* Layout Toggle */}
               <div className="flex bg-gray-100 p-1 rounded-lg border border-gray-200">
                 <button
                   onClick={() => setLayoutMode('flow')}
@@ -725,7 +767,6 @@
 
               <div className="w-px h-6 bg-gray-300 mx-2"></div>
               
-              {/* Auto Layout Button */}
               <button 
                 onClick={handleAutoLayout} 
                 className="flex items-center px-3 py-1.5 text-sm font-medium text-white bg-emerald-500 rounded-lg hover:bg-emerald-600 transition-colors shadow-sm"
@@ -733,7 +774,6 @@
                 <i className="fa-solid fa-magic mr-2"></i> {t.autoLayout}
               </button>
 
-              {/* Export / Import */}
               <button onClick={handleExport} className="flex items-center px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
                 <i className="fa-solid fa-file-code mr-2"></i> {lang === 'zh' ? '匯出 JSON' : 'Export JSON'}
               </button>
@@ -747,10 +787,8 @@
             </div>
           </header>
 
-          {/* Main Workspace */}
           <div className="flex flex-1 overflow-hidden relative">
             
-            {/* Left Sidebar (Component Library) */}
             {mode === 'edit' && (
               <aside className="w-64 bg-white border-r border-gray-200 p-4 flex flex-col z-10 shadow-[4px_0_24px_rgba(0,0,0,0.02)]">
                 <h2 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4 flex items-center">
@@ -780,7 +818,6 @@
               </aside>
             )}
 
-            {/* Custom Canvas Area */}
             <main 
               className="flex-1 relative bg-[#fafafa] overflow-hidden" 
               ref={canvasRef}
@@ -791,6 +828,7 @@
               onWheel={onCanvasWheel}
               onDragOver={(e) => e.preventDefault()}
               onDrop={onCanvasDrop}
+              onContextMenu={onCanvasContextMenu}
               style={{ backgroundImage: 'radial-gradient(#e2e8f0 1px, transparent 1px)', backgroundSize: `${20 * transform.scale}px ${20 * transform.scale}px`, backgroundPosition: `${transform.x}px ${transform.y}px` }}
             >
               <div 
@@ -800,7 +838,6 @@
                   width: '100%', height: '100%'
                 }}
               >
-                {/* Edges Layer */}
                 <svg className="absolute top-0 left-0 w-full h-full pointer-events-none overflow-visible">
                   {edges.map(edge => {
                     const sourceNode = nodes.find(n => n.id === edge.source);
@@ -818,14 +855,14 @@
                         d={getBezierPath(startX, startY, endX, endY)}
                         fill="none"
                         stroke="#94a3b8"
-                        strokeWidth="2"
+                        strokeWidth="4"
                         markerEnd="url(#arrow)"
-                        className="transition-all duration-300"
+                        className="transition-all duration-300 pointer-events-auto cursor-pointer hover:stroke-blue-400"
+                        onContextMenu={(e) => onEdgeContextMenu(e, edge)}
                       />
                     );
                   })}
                   
-                  {/* Drawing Edge */}
                   {drawingEdge && (
                     <path 
                       d={getBezierPath(drawingEdge.startX, drawingEdge.startY, drawingEdge.currentX, drawingEdge.currentY)}
@@ -843,13 +880,11 @@
                   </defs>
                 </svg>
                 
-                {/* 這是要新增的連線標籤層 (Edge Labels Layer) */}
                 {edges.map(edge => {
                   const sourceNode = nodes.find(n => n.id === edge.source);
                   const targetNode = nodes.find(n => n.id === edge.target);
                   if (!sourceNode || !targetNode) return null;
 
-                  // 計算線段的正中心點
                   const startX = sourceNode.x + NODE_WIDTH / 2;
                   const startY = sourceNode.y + NODE_HEIGHT + 15;
                   const endX = targetNode.x + NODE_WIDTH / 2;
@@ -868,7 +903,7 @@
                           type="text"
                           value={edge.label || ''}
                           onChange={(e) => updateEdgeLabel(edge.id, e.target.value)}
-                          onMouseDown={(e) => e.stopPropagation()} // 防呆：避免點擊輸入框時觸發畫布拖曳
+                          onMouseDown={(e) => e.stopPropagation()} 
                           placeholder={t.edgeLabel}
                           className="px-2 py-0.5 text-xs bg-white/80 backdrop-blur-sm border border-transparent hover:border-blue-300 focus:border-blue-500 focus:bg-white rounded shadow-sm outline-none transition-all w-20 focus:w-32 text-center text-gray-700 placeholder-gray-400 font-medium"
                         />
@@ -883,7 +918,6 @@
                   );
                 })}
 
-                {/* Nodes Layer */}
                 {nodes.map(node => {
                   const nodeDef = NODE_TYPES.find(n => n.type === node.data.nodeType) || NODE_TYPES[0];
                   const isSelected = selectedNodeId === node.id;
@@ -896,18 +930,15 @@
                       onMouseDown={(e) => onNodeMouseDown(e, node)}
                       onContextMenu={(e) => onNodeContextMenu(e, node)}
                     >
-                      {/* Shape Background Layer */}
                       <div 
                         className={`absolute inset-0 border-2 shadow-sm bg-white transition-all ${nodeDef.color} ${nodeDef.shapeClass || 'rounded-xl'} ${isSelected ? 'ring-4 ring-opacity-50 ring-blue-400 scale-105 shadow-md' : ''}`}
                       />
                       
-                      {/* Top Port (Target) */}
                       <div 
                         className={`absolute -top-3 left-1/2 -translate-x-1/2 w-4 h-4 bg-gray-300 border-2 border-white rounded-full ${mode === 'edit' ? 'hover:bg-blue-500 hover:scale-125 cursor-crosshair' : 'hidden'} transition-all z-20`}
                         onMouseUp={(e) => onPortMouseUp(e, node.id, true)}
                       />
 
-                      {/* Content Layer */}
                       <div className={`absolute inset-0 flex items-center justify-center px-4 pointer-events-none ${nodeDef.contentClass || ''}`}>
                         <div className={`flex items-center space-x-2 ${isSelected ? 'scale-105' : ''} transition-transform`}>
                           <i className={`fa-solid ${nodeDef.iconClass} opacity-70 w-4 text-center`}></i>
@@ -915,13 +946,11 @@
                         </div>
                       </div>
 
-                      {/* Bottom Port (Source) */}
                       <div 
                         className={`absolute -bottom-3 left-1/2 -translate-x-1/2 w-4 h-4 bg-gray-300 border-2 border-white rounded-full ${mode === 'edit' ? 'hover:bg-blue-500 hover:scale-125 cursor-crosshair' : 'hidden'} transition-all z-20`}
                         onMouseDown={(e) => onPortMouseDown(e, node.id, true)}
                       />
 
-                      {/* Floating Description */}
                       {node.data.description && (
                         <div className="absolute top-full left-1/2 -translate-x-1/2 mt-5 w-48 p-2 bg-gray-800 text-white text-xs rounded-lg shadow-xl z-50 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none before:content-[''] before:absolute before:-top-2 before:left-1/2 before:-translate-x-1/2 before:border-4 before:border-transparent before:border-b-gray-800">
                           {node.data.description}
@@ -932,24 +961,53 @@
                 })}
               </div>
 
-              {/* Context Menu */}
               {contextMenu && mode === 'edit' && (
                 <div 
                   className="context-menu absolute bg-white border border-gray-200 rounded-lg shadow-xl py-1 z-50 w-40 overflow-hidden"
                   style={{ top: contextMenu.top, left: contextMenu.left }}
                   onMouseDown={(e) => e.stopPropagation()}
+                  onContextMenu={(e) => e.preventDefault()}
                 >
-                  <button
-                    onMouseDown={(e) => { e.stopPropagation(); deleteNode(); }}
-                    className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center transition-colors"
-                  >
-                    <i className="fa-solid fa-trash mr-2"></i> {t.deleteNode}
-                  </button>
+                  {contextMenu.type === 'canvas' && (
+                    <button
+                      onMouseDown={(e) => { e.stopPropagation(); handleContextMenuAction('paste'); }}
+                      disabled={!clipboard}
+                      className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center transition-colors disabled:opacity-40 disabled:hover:bg-white disabled:cursor-not-allowed"
+                    >
+                      <i className="fa-solid fa-paste mr-2"></i> {t.paste}
+                    </button>
+                  )}
+                  
+                  {contextMenu.type === 'node' && (
+                    <>
+                      <button
+                        onMouseDown={(e) => { e.stopPropagation(); handleContextMenuAction('copy'); }}
+                        className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center transition-colors"
+                      >
+                        <i className="fa-solid fa-copy mr-2"></i> {t.copy}
+                      </button>
+                      <button
+                        onMouseDown={(e) => { e.stopPropagation(); handleContextMenuAction('cut'); }}
+                        className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center transition-colors"
+                      >
+                        <i className="fa-solid fa-cut mr-2"></i> {t.cut}
+                      </button>
+                      <div className="border-t border-gray-100 my-1"></div>
+                    </>
+                  )}
+
+                  {(contextMenu.type === 'node' || contextMenu.type === 'edge') && (
+                    <button
+                      onMouseDown={(e) => { e.stopPropagation(); handleContextMenuAction('delete'); }}
+                      className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center transition-colors"
+                    >
+                      <i className="fa-solid fa-trash mr-2"></i> {t.delete}
+                    </button>
+                  )}
                 </div>
               )}
             </main>
 
-            {/* Right Sidebar (Property Panel) */}
             <aside className={`w-80 bg-white border-l border-gray-200 p-6 flex flex-col z-20 shadow-[-4px_0_24px_rgba(0,0,0,0.02)] transition-transform duration-300 absolute right-0 h-full ${selectedNode ? 'translate-x-0' : 'translate-x-full'}`}>
               {selectedNode && (
                 <>
@@ -1012,7 +1070,6 @@
               )}
             </aside>
 
-            {/* Global Toast Notification */}
             {toastMessage && (
               <div className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-gray-800 text-white px-6 py-3 rounded-full shadow-lg text-sm font-medium animate-bounce z-50">
                 {toastMessage}
