@@ -1,0 +1,868 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>App Architect</title>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- FontAwesome for Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  
+  <!-- React & ReactDOM (Production) -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  
+  <!-- Babel for in-browser JSX compilation -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <style>
+    body {
+      margin: 0;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+    /* Hide scrollbars for the main app to act like a canvas tool */
+    ::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #f1f5f9; 
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #cbd5e1; 
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #94a3b8; 
+    }
+  </style>
+</head>
+<body class="overflow-hidden">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useCallback, useRef, useEffect } = React;
+
+    const TRANSLATIONS = {
+      zh: {
+        title: 'App 結構規劃師',
+        edit: '編輯',
+        view: '檢視',
+        export: '匯出',
+        import: '匯入',
+        autoLayout: '一鍵整理',
+        layoutOrganized: '畫面已自動整理！',
+        components: '元件庫',
+        tip: '提示：拖曳元件至畫布。按住 Alt + 滑鼠滾輪縮放，直接滾動或拖曳背景可平移。',
+        properties: '屬性面板',
+        nodeLabel: '節點名稱',
+        description: '詳細描述',
+        nodeId: '節點 ID:',
+        type: '類型:',
+        deleteNode: '刪除節點',
+        exportSuccess: '專案匯出成功！',
+        importSuccess: '專案匯入成功！',
+        importInvalid: '無效的專案格式。',
+        importFailed: '解析 JSON 檔案失敗。',
+        placeholderName: '例如：登入頁面',
+        placeholderDesc: '輸入詳細功能描述...',
+        noDesc: '尚未提供描述。',
+        new: '新增',
+        page: '頁面 / 畫面',
+        group: '功能模組',
+        sticky: '便利貼',
+        edgeLabel: '連線說明...'
+      },
+      en: {
+        title: 'App Architect',
+        edit: 'Edit',
+        view: 'View',
+        export: 'Export',
+        import: 'Import',
+        autoLayout: 'Auto Layout',
+        layoutOrganized: 'Layout organized successfully!',
+        components: 'Components',
+        tip: 'Tip: Drag components to canvas. Hold Alt + mouse wheel to zoom, scroll or drag background to pan.',
+        properties: 'Properties',
+        nodeLabel: 'Node Label',
+        description: 'Description',
+        nodeId: 'Node ID:',
+        type: 'Type:',
+        deleteNode: 'Delete Node',
+        exportSuccess: 'Project exported successfully!',
+        importSuccess: 'Project imported successfully!',
+        importInvalid: 'Invalid project file format.',
+        importFailed: 'Failed to parse JSON file.',
+        placeholderName: 'e.g. Login Screen',
+        placeholderDesc: 'Enter detailed functionality...',
+        noDesc: 'No description provided.',
+        new: 'New',
+        page: 'Page / Screen',
+        group: 'Feature Group',
+        sticky: 'Sticky Note',
+        edgeLabel: 'Edge label...'
+      }
+    };
+
+    const getNodeTypes = (lang) => {
+      const t = TRANSLATIONS[lang];
+      return [
+        { type: 'terminal', label: lang === 'zh' ? '起點 / 終點' : 'Start / End', iconClass: 'fa-play', color: 'bg-red-50 border-red-500 text-red-900', defaultDesc: lang === 'zh' ? '流程的開始或結束點' : 'Start or end of process', shapeClass: 'rounded-full', contentClass: '' },
+        { type: 'process', label: lang === 'zh' ? '處理程序' : 'Process', iconClass: 'fa-gear', color: 'bg-blue-50 border-blue-500 text-blue-900', defaultDesc: lang === 'zh' ? '一個動作或運算' : 'An action or operation', shapeClass: 'rounded-md', contentClass: '' },
+        { type: 'decision', label: lang === 'zh' ? '條件判斷' : 'Decision', iconClass: 'fa-diamond', color: 'bg-orange-50 border-orange-500 text-orange-900', defaultDesc: lang === 'zh' ? '判斷條件，產生分支' : 'Decision point', shapeClass: 'rounded-tl-[1.5rem] rounded-br-[1.5rem] rounded-tr-md rounded-bl-md', contentClass: '' },
+        { type: 'io', label: lang === 'zh' ? '資料 / IO' : 'Data / I/O', iconClass: 'fa-database', color: 'bg-green-50 border-green-500 text-green-900', defaultDesc: lang === 'zh' ? '資料的輸入或輸出' : 'Input or output data', shapeClass: '-skew-x-12 rounded-sm', contentClass: 'skew-x-12' },
+        { type: 'page', label: t.page || '頁面', iconClass: 'fa-file-lines', color: 'bg-white border-gray-400 text-gray-800', defaultDesc: lang === 'zh' ? 'APP或網站的獨立頁面' : 'A single screen or page', shapeClass: 'rounded-sm', contentClass: '' },
+        { type: 'group', label: t.group || '模組', iconClass: 'fa-object-group', color: 'bg-gray-50 border-gray-400 border-dashed text-gray-600', defaultDesc: lang === 'zh' ? '邏輯相近的功能區塊' : 'Logical group of features', shapeClass: 'rounded-xl', contentClass: '' },
+        { type: 'sticky', label: t.sticky || '便利貼', iconClass: 'fa-note-sticky', color: 'bg-yellow-200 border-yellow-300 text-yellow-900', defaultDesc: lang === 'zh' ? '備註說明或待辦事項' : 'Notes or to-dos', shapeClass: 'rounded-none shadow-md', contentClass: '' }
+      ];
+    };
+
+    const NODE_WIDTH = 180;
+    const NODE_HEIGHT = 60; // Approximate height for bounding box
+
+    // Simple Tree Layout Algorithm for Mode Toggle
+    const calculateTreeLayout = (nodes, edges) => {
+      if (nodes.length === 0) return nodes;
+
+      const targets = new Set(edges.map(e => e.target));
+      const roots = nodes.filter(n => !targets.has(n.id));
+      
+      const levels = {};
+      const nodeToLevel = {};
+
+      const assignLevel = (nodeId, level) => {
+        if (!levels[level]) levels[level] = [];
+        if (!levels[level].includes(nodeId)) {
+          levels[level].push(nodeId);
+          nodeToLevel[nodeId] = level;
+        }
+        const children = edges.filter(e => e.source === nodeId).map(e => e.target);
+        children.forEach(childId => assignLevel(childId, level + 1));
+      };
+
+      if (roots.length > 0) {
+        roots.forEach(r => assignLevel(r.id, 0));
+      } else {
+        assignLevel(nodes[0].id, 0); // Fallback for cycles
+      }
+
+      nodes.forEach(n => {
+        if (nodeToLevel[n.id] === undefined) assignLevel(n.id, 0);
+      });
+
+      const newNodes = [...nodes];
+      const LEVEL_HEIGHT = 120;
+      const SPACING = 60;
+
+      Object.keys(levels).forEach(levelStr => {
+        const level = parseInt(levelStr);
+        const levelNodes = levels[levelStr];
+        const totalWidth = levelNodes.length * NODE_WIDTH + (levelNodes.length - 1) * SPACING;
+        let startX = -totalWidth / 2 + NODE_WIDTH / 2 + 400; // 400 is arbitrary center offset
+
+        levelNodes.forEach(nodeId => {
+          const nodeIndex = newNodes.findIndex(n => n.id === nodeId);
+          if (nodeIndex !== -1) {
+            newNodes[nodeIndex] = {
+              ...newNodes[nodeIndex],
+              x: startX,
+              y: level * LEVEL_HEIGHT + 100
+            };
+          }
+          startX += NODE_WIDTH + SPACING;
+        });
+      });
+
+      return newNodes;
+    };
+
+    // Generate SVG path for a smooth bezier curve between nodes
+    const getBezierPath = (startX, startY, endX, endY) => {
+      const deltaY = Math.abs(endY - startY);
+      const controlOffset = Math.max(deltaY / 2, 40);
+      return `M ${startX},${startY} C ${startX},${startY + controlOffset} ${endX},${endY - controlOffset} ${endX},${endY}`;
+    };
+
+    function AppArchitect() {
+      // App States
+      const [lang, setLang] = useState('zh');
+      const [nodes, setNodes] = useState([]);
+      const [edges, setEdges] = useState([]);
+      const [mode, setMode] = useState('edit'); // 'edit' or 'view'
+      const [layoutMode, setLayoutMode] = useState('flow'); // 'flow' or 'tree'
+      
+      // Interaction States
+      const [selectedNodeId, setSelectedNodeId] = useState(null);
+      const [contextMenu, setContextMenu] = useState(null);
+      const [toastMessage, setToastMessage] = useState(null);
+      
+      // Canvas Transform State (Pan & Zoom)
+      const [transform, setTransform] = useState({ x: 0, y: 0, scale: 1 });
+      const canvasRef = useRef(null);
+      const fileInputRef = useRef(null);
+
+      // Dragging States
+      const [isPanning, setIsPanning] = useState(false);
+      const [panStart, setPanStart] = useState({ x: 0, y: 0 });
+      const [draggingNode, setDraggingNode] = useState(null);
+      const [drawingEdge, setDrawingEdge] = useState(null);
+
+      const t = TRANSLATIONS[lang];
+      const NODE_TYPES = getNodeTypes(lang);
+
+      const showToast = (msg) => {
+        setToastMessage(msg);
+        setTimeout(() => setToastMessage(null), 3000);
+      };
+
+      useEffect(() => {
+        if (layoutMode === 'tree' && nodes.length > 0) {
+          setNodes(prev => calculateTreeLayout(prev, edges));
+          setTransform({ x: 0, y: 0, scale: 1 });
+        }
+      }, [layoutMode, edges]);
+
+      const getCanvasCoords = (e) => {
+        const rect = canvasRef.current.getBoundingClientRect();
+        return {
+          x: (e.clientX - rect.left - transform.x) / transform.scale,
+          y: (e.clientY - rect.top - transform.y) / transform.scale
+        };
+      };
+
+      const onCanvasMouseDown = (e) => {
+        if (e.button !== 0) return;
+        if (e.target.closest('.canvas-element') === null && e.target.closest('.context-menu') === null) {
+          setSelectedNodeId(null);
+          setContextMenu(null);
+          setIsPanning(true);
+          setPanStart({ x: e.clientX - transform.x, y: e.clientY - transform.y });
+        }
+      };
+
+      const onCanvasMouseMove = (e) => {
+        if (isPanning) {
+          setTransform(prev => ({ ...prev, x: e.clientX - panStart.x, y: e.clientY - panStart.y }));
+        } else if (draggingNode && mode === 'edit') {
+          const dx = (e.clientX - draggingNode.mouseX) / transform.scale;
+          const dy = (e.clientY - draggingNode.mouseY) / transform.scale;
+          
+          setNodes(nds => nds.map(n => 
+            n.id === draggingNode.id 
+              ? { ...n, x: draggingNode.startX + dx, y: draggingNode.startY + dy }
+              : n
+          ));
+        } else if (drawingEdge && mode === 'edit') {
+          const coords = getCanvasCoords(e);
+          setDrawingEdge(prev => ({ ...prev, currentX: coords.x, currentY: coords.y }));
+        }
+      };
+
+      const onCanvasMouseUp = () => {
+        setIsPanning(false);
+        setDraggingNode(null);
+        setDrawingEdge(null);
+      };
+
+      // Alt + 滾輪縮放邏輯整併
+      const onCanvasWheel = (e) => {
+        if (e.altKey) {
+          e.preventDefault();
+          const scaleAdjustment = e.deltaY > 0 ? 0.9 : 1.1;
+          let newScale = transform.scale * scaleAdjustment;
+          newScale = Math.min(Math.max(0.2, newScale), 3); // 限制縮放比例 0.2 ~ 3.0
+          
+          const rect = canvasRef.current.getBoundingClientRect();
+          const mouseX = e.clientX - rect.left;
+          const mouseY = e.clientY - rect.top;
+          
+          // 計算縮放後的相對座標偏移
+          const newX = mouseX - (mouseX - transform.x) * (newScale / transform.scale);
+          const newY = mouseY - (mouseY - transform.y) * (newScale / transform.scale);
+
+          setTransform({ x: newX, y: newY, scale: newScale });
+        } else {
+          // 未按 Alt 鍵時，維持原生的滑鼠滾輪平移效果
+          setTransform(prev => ({ ...prev, x: prev.x - e.deltaX, y: prev.y - e.deltaY }));
+        }
+      };
+
+      // 一鍵整理神仙按鈕邏輯
+      const handleAutoLayout = () => {
+        const targets = new Set(edges.map(e => e.target));
+        const roots = nodes.filter(n => !targets.has(n.id)); 
+        
+        const levels = {};
+        const visited = new Set();
+        
+        // 如果沒有源頭（可能是循環或空），就抓第一個當源頭
+        const queue = roots.length > 0 
+          ? roots.map(r => ({ id: r.id, level: 0 })) 
+          : (nodes.length > 0 ? [{ id: nodes[0].id, level: 0 }] : []);
+        
+        // BFS 尋找階層
+        while (queue.length > 0) {
+          const curr = queue.shift();
+          if (!visited.has(curr.id)) {
+            visited.add(curr.id);
+            if (!levels[curr.level]) levels[curr.level] = [];
+            levels[curr.level].push(curr.id);
+            
+            const children = edges
+              .filter(e => e.source === curr.id)
+              .map(e => ({ id: e.target, level: curr.level + 1 }));
+            queue.push(...children);
+          }
+        }
+        
+        // 處理沒有連線的邊緣節點
+        nodes.forEach(n => {
+          if (!visited.has(n.id)) {
+            if (!levels[0]) levels[0] = [];
+            levels[0].push(n.id);
+            visited.add(n.id);
+          }
+        });
+
+        const nodeSpacingWidth = 250; 
+        const nodeSpacingHeight = 150; 
+        
+        const newNodes = nodes.map(node => {
+          let targetLevel = 0, targetIndex = 0;
+          Object.keys(levels).forEach(level => {
+            const idx = levels[level].indexOf(node.id);
+            if (idx !== -1) {
+              targetLevel = parseInt(level);
+              targetIndex = idx;
+            }
+          });
+          return {
+            ...node,
+            x: targetIndex * nodeSpacingWidth + 50,
+            y: targetLevel * nodeSpacingHeight + 50
+          };
+        });
+
+        setNodes(newNodes);
+        setTransform({ x: 0, y: 0, scale: 1 }); // 視角歸零
+        showToast(t.layoutOrganized);
+      };
+
+      const onNodeMouseDown = (e, node) => {
+        if (e.button !== 0 || mode === 'view') {
+          if (mode === 'view') setSelectedNodeId(node.id);
+          return;
+        }
+        e.stopPropagation();
+        setSelectedNodeId(node.id);
+        setContextMenu(null);
+        setDraggingNode({
+          id: node.id,
+          startX: node.x,
+          startY: node.y,
+          mouseX: e.clientX,
+          mouseY: e.clientY
+        });
+      };
+
+      const onNodeContextMenu = (e, node) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (mode === 'view') return;
+        
+        const rect = canvasRef.current.getBoundingClientRect();
+        setContextMenu({
+          id: node.id,
+          top: e.clientY - rect.top,
+          left: e.clientX - rect.left,
+        });
+      };
+
+      const onPortMouseDown = (e, nodeId, isSource) => {
+        e.stopPropagation();
+        if (mode === 'view' || !isSource) return;
+        
+        const node = nodes.find(n => n.id === nodeId);
+        const startX = node.x + NODE_WIDTH / 2;
+        const startY = node.y + NODE_HEIGHT + 15;
+        
+        setDrawingEdge({
+          source: nodeId,
+          startX,
+          startY,
+          currentX: startX,
+          currentY: startY
+        });
+      };
+
+      const onPortMouseUp = (e, nodeId, isTarget) => {
+        // 解法防呆：如果沒有在畫線，就不攔截事件，直接交給外層 Canvas 處理
+        if (!drawingEdge) return;
+        
+        e.stopPropagation();
+        if (mode === 'view' || !isTarget) {
+          setDrawingEdge(null);
+          return;
+        }
+        
+        if (drawingEdge.source !== nodeId) {
+          const edgeExists = edges.some(edge => edge.source === drawingEdge.source && edge.target === nodeId);
+          if (!edgeExists) {
+            setEdges(prev => [...prev, {
+              id: `edge_${Date.now()}`,
+              source: drawingEdge.source,
+              target: nodeId
+            }]);
+          }
+        }
+        setDrawingEdge(null);
+      };
+
+      const onDragStartSidebar = (event, nodeTypeObj) => {
+        event.dataTransfer.setData('application/node', JSON.stringify(nodeTypeObj));
+        event.dataTransfer.effectAllowed = 'move';
+      };
+
+      const onCanvasDrop = (e) => {
+        e.preventDefault();
+        if (mode === 'view') return;
+
+        const typeDataString = e.dataTransfer.getData('application/node');
+        if (!typeDataString) return;
+        
+        const typeData = JSON.parse(typeDataString);
+        const coords = getCanvasCoords(e);
+
+        const newNode = {
+          id: `node_${Date.now()}`,
+          x: coords.x - NODE_WIDTH / 2,
+          y: coords.y - NODE_HEIGHT / 2,
+          data: { 
+            label: `${t.new} ${typeData.label}`, 
+            description: typeData.defaultDesc,
+            nodeType: typeData.type 
+          }
+        };
+
+        setNodes(nds => [...nds, newNode]);
+      };
+
+      // 修復刪除邏輯
+      const deleteNode = () => {
+        if (!contextMenu) return;
+        setNodes(nds => nds.filter(node => node.id !== contextMenu.id));
+        setEdges(eds => eds.filter(edge => edge.source !== contextMenu.id && edge.target !== contextMenu.id));
+        if (selectedNodeId === contextMenu.id) setSelectedNodeId(null);
+        setContextMenu(null); // 清除選單
+      };
+
+      const updateNodeData = (id, field, value) => {
+        setNodes(nds => nds.map(node => node.id === id ? { ...node, data: { ...node.data, [field]: value } } : node));
+      };
+
+      const updateEdgeLabel = (id, label) => {
+        setEdges(eds => eds.map(edge => edge.id === id ? { ...edge, label } : edge));
+      };
+
+      const handleExport = () => {
+        const data = { nodes, edges };
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = 'ia-user-flow-project.json';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        showToast(t.exportSuccess);
+      };
+
+      const handleImport = (event) => {
+        const file = event.target.files[0];
+        if (!file) return;
+        
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          try {
+            const parsed = JSON.parse(e.target.result);
+            if (parsed.nodes && parsed.edges) {
+              setNodes(parsed.nodes);
+              setEdges(parsed.edges);
+              setTransform({ x: 0, y: 0, scale: 1 });
+              showToast(t.importSuccess);
+            } else {
+              showToast(t.importInvalid);
+            }
+          } catch (err) {
+            showToast(t.importFailed);
+          }
+        };
+        reader.readAsText(file);
+        event.target.value = ''; 
+      };
+
+      const selectedNode = nodes.find(n => n.id === selectedNodeId);
+
+      return (
+        <div className="flex flex-col h-screen w-full bg-gray-50 text-gray-800 font-sans overflow-hidden">
+          
+          {/* Top Navigation Bar */}
+          <header className="flex items-center justify-between px-6 py-3 bg-white border-b border-gray-200 shadow-sm z-20">
+            <div className="flex items-center space-x-3">
+              <div className="p-2 bg-blue-600 text-white rounded-lg flex items-center justify-center w-8 h-8">
+                <i className="fa-solid fa-sitemap"></i>
+              </div>
+              <h1 className="text-xl font-extrabold text-gray-800 tracking-tight">{t.title}</h1>
+            </div>
+
+            <div className="flex items-center space-x-4">
+              {/* Language Toggle */}
+              <button
+                onClick={() => setLang(lang === 'zh' ? 'en' : 'zh')}
+                className="px-3 py-1 text-sm font-bold text-gray-500 hover:text-gray-800 transition-colors bg-gray-100 rounded-md border border-gray-200"
+              >
+                {lang === 'zh' ? 'EN' : '中文'}
+              </button>
+              <div className="w-px h-6 bg-gray-300 mx-2"></div>
+
+              {/* Mode Toggle */}
+              <div className="flex bg-gray-100 p-1 rounded-lg border border-gray-200">
+                <button
+                  onClick={() => setMode('edit')}
+                  className={`flex items-center px-4 py-1.5 rounded-md text-sm font-medium transition-all ${mode === 'edit' ? 'bg-white shadow-sm text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+                >
+                  <i className="fa-solid fa-pen mr-2"></i> {t.edit}
+                </button>
+                <button
+                  onClick={() => setMode('view')}
+                  className={`flex items-center px-4 py-1.5 rounded-md text-sm font-medium transition-all ${mode === 'view' ? 'bg-white shadow-sm text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+                >
+                  <i className="fa-solid fa-eye mr-2"></i> {t.view}
+                </button>
+              </div>
+
+              <div className="w-px h-6 bg-gray-300 mx-2"></div>
+
+              {/* Layout Toggle */}
+              <div className="flex bg-gray-100 p-1 rounded-lg border border-gray-200">
+                <button
+                  onClick={() => setLayoutMode('flow')}
+                  className={`flex items-center px-3 py-1.5 rounded-md text-sm font-medium transition-all ${layoutMode === 'flow' ? 'bg-white shadow-sm text-gray-800' : 'text-gray-500 hover:text-gray-700'}`}
+                  title="Free Flow Layout"
+                >
+                  <i className="fa-solid fa-code-branch"></i>
+                </button>
+                <button
+                  onClick={() => setLayoutMode('tree')}
+                  className={`flex items-center px-3 py-1.5 rounded-md text-sm font-medium transition-all ${layoutMode === 'tree' ? 'bg-white shadow-sm text-gray-800' : 'text-gray-500 hover:text-gray-700'}`}
+                  title="Auto Tree Layout"
+                >
+                  <i className="fa-solid fa-sitemap"></i>
+                </button>
+              </div>
+
+              <div className="w-px h-6 bg-gray-300 mx-2"></div>
+              
+              {/* Auto Layout Button */}
+              <button 
+                onClick={handleAutoLayout} 
+                className="flex items-center px-3 py-1.5 text-sm font-medium text-white bg-emerald-500 rounded-lg hover:bg-emerald-600 transition-colors shadow-sm"
+              >
+                <i className="fa-solid fa-magic mr-2"></i> {t.autoLayout}
+              </button>
+
+              {/* Export / Import */}
+              <button onClick={handleExport} className="flex items-center px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
+                <i className="fa-solid fa-download mr-2"></i> {t.export}
+              </button>
+              <button onClick={() => fileInputRef.current?.click()} className="flex items-center px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
+                <i className="fa-solid fa-upload mr-2"></i> {t.import}
+              </button>
+              <input type="file" ref={fileInputRef} onChange={handleImport} accept=".json" className="hidden" />
+            </div>
+          </header>
+
+          {/* Main Workspace */}
+          <div className="flex flex-1 overflow-hidden relative">
+            
+            {/* Left Sidebar (Component Library) */}
+            {mode === 'edit' && (
+              <aside className="w-64 bg-white border-r border-gray-200 p-4 flex flex-col z-10 shadow-[4px_0_24px_rgba(0,0,0,0.02)]">
+                <h2 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4 flex items-center">
+                  <i className="fa-solid fa-cubes mr-2"></i> {t.components}
+                </h2>
+                <div className="space-y-3">
+                  {NODE_TYPES.map((node) => {
+                    return (
+                      <div
+                        key={node.type}
+                        draggable
+                        onDragStart={(e) => onDragStartSidebar(e, node)}
+                        className={`flex items-center p-3 rounded-lg border cursor-grab active:cursor-grabbing hover:-translate-y-0.5 transition-transform ${node.color}`}
+                      >
+                        <i className={`fa-solid ${node.iconClass} mr-3 opacity-70 w-4 text-center`}></i>
+                        <span className="font-semibold text-sm">{node.label}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+                
+                <div className="mt-auto pt-6 border-t border-gray-100">
+                  <p className="text-xs text-gray-400 leading-relaxed">
+                    <span className="font-bold text-gray-500">Tip:</span> {t.tip}
+                  </p>
+                </div>
+              </aside>
+            )}
+
+            {/* Custom Canvas Area */}
+            <main 
+              className="flex-1 relative bg-[#fafafa] overflow-hidden" 
+              ref={canvasRef}
+              onMouseDown={onCanvasMouseDown}
+              onMouseMove={onCanvasMouseMove}
+              onMouseUp={onCanvasMouseUp}
+              onMouseLeave={onCanvasMouseUp}
+              onWheel={onCanvasWheel}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={onCanvasDrop}
+              style={{ backgroundImage: 'radial-gradient(#e2e8f0 1px, transparent 1px)', backgroundSize: `${20 * transform.scale}px ${20 * transform.scale}px`, backgroundPosition: `${transform.x}px ${transform.y}px` }}
+            >
+              <div 
+                className="absolute origin-top-left will-change-transform"
+                style={{ 
+                  transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`,
+                  width: '100%', height: '100%'
+                }}
+              >
+                {/* Edges Layer */}
+                <svg className="absolute top-0 left-0 w-full h-full pointer-events-none overflow-visible">
+                  {edges.map(edge => {
+                    const sourceNode = nodes.find(n => n.id === edge.source);
+                    const targetNode = nodes.find(n => n.id === edge.target);
+                    if (!sourceNode || !targetNode) return null;
+                    
+                    const startX = sourceNode.x + NODE_WIDTH / 2;
+                    const startY = sourceNode.y + NODE_HEIGHT + 15;
+                    const endX = targetNode.x + NODE_WIDTH / 2;
+                    const endY = targetNode.y - 15;
+
+                    return (
+                      <path 
+                        key={edge.id}
+                        d={getBezierPath(startX, startY, endX, endY)}
+                        fill="none"
+                        stroke="#94a3b8"
+                        strokeWidth="2"
+                        markerEnd="url(#arrow)"
+                        className="transition-all duration-300"
+                      />
+                    );
+                  })}
+                  
+                  {/* Drawing Edge */}
+                  {drawingEdge && (
+                    <path 
+                      d={getBezierPath(drawingEdge.startX, drawingEdge.startY, drawingEdge.currentX, drawingEdge.currentY)}
+                      fill="none"
+                      stroke="#3b82f6"
+                      strokeWidth="2"
+                      strokeDasharray="5,5"
+                    />
+                  )}
+
+                  <defs>
+                    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                      <path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8" />
+                    </marker>
+                  </defs>
+                </svg>
+                
+                {/* 這是要新增的連線標籤層 (Edge Labels Layer) */}
+                {edges.map(edge => {
+                  const sourceNode = nodes.find(n => n.id === edge.source);
+                  const targetNode = nodes.find(n => n.id === edge.target);
+                  if (!sourceNode || !targetNode) return null;
+
+                  // 計算線段的正中心點
+                  const startX = sourceNode.x + NODE_WIDTH / 2;
+                  const startY = sourceNode.y + NODE_HEIGHT + 15;
+                  const endX = targetNode.x + NODE_WIDTH / 2;
+                  const endY = targetNode.y - 15;
+                  const midX = (startX + endX) / 2;
+                  const midY = (startY + endY) / 2;
+
+                  return (
+                    <div
+                      key={`label_${edge.id}`}
+                      className="absolute z-10 flex items-center justify-center -translate-x-1/2 -translate-y-1/2"
+                      style={{ left: midX, top: midY }}
+                    >
+                      {mode === 'edit' ? (
+                        <input
+                          type="text"
+                          value={edge.label || ''}
+                          onChange={(e) => updateEdgeLabel(edge.id, e.target.value)}
+                          onMouseDown={(e) => e.stopPropagation()} // 防呆：避免點擊輸入框時觸發畫布拖曳
+                          placeholder={t.edgeLabel}
+                          className="px-2 py-0.5 text-xs bg-white/80 backdrop-blur-sm border border-transparent hover:border-blue-300 focus:border-blue-500 focus:bg-white rounded shadow-sm outline-none transition-all w-20 focus:w-32 text-center text-gray-700 placeholder-gray-400 font-medium"
+                        />
+                      ) : (
+                        edge.label && (
+                          <div className="px-2 py-0.5 text-xs bg-white/90 backdrop-blur-sm border border-gray-200 rounded shadow-sm text-gray-700 font-medium font-mono">
+                            {edge.label}
+                          </div>
+                        )
+                      )}
+                    </div>
+                  );
+                })}
+
+                {/* Nodes Layer */}
+                {nodes.map(node => {
+                  const nodeDef = NODE_TYPES.find(n => n.type === node.data.nodeType) || NODE_TYPES[0];
+                  const isSelected = selectedNodeId === node.id;
+                  
+                  return (
+                    <div
+                      key={node.id}
+                      className={`canvas-element absolute group ${mode === 'edit' ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} transition-shadow`}
+                      style={{ left: node.x, top: node.y, width: NODE_WIDTH, height: NODE_HEIGHT }}
+                      onMouseDown={(e) => onNodeMouseDown(e, node)}
+                      onContextMenu={(e) => onNodeContextMenu(e, node)}
+                    >
+                      {/* Shape Background Layer */}
+                      <div 
+                        className={`absolute inset-0 border-2 shadow-sm bg-white transition-all ${nodeDef.color} ${nodeDef.shapeClass || 'rounded-xl'} ${isSelected ? 'ring-4 ring-opacity-50 ring-blue-400 scale-105 shadow-md' : ''}`}
+                      />
+                      
+                      {/* Top Port (Target) */}
+                      <div 
+                        className={`absolute -top-3 left-1/2 -translate-x-1/2 w-4 h-4 bg-gray-300 border-2 border-white rounded-full ${mode === 'edit' ? 'hover:bg-blue-500 hover:scale-125 cursor-crosshair' : 'hidden'} transition-all z-20`}
+                        onMouseUp={(e) => onPortMouseUp(e, node.id, true)}
+                      />
+
+                      {/* Content Layer */}
+                      <div className={`absolute inset-0 flex items-center justify-center px-4 pointer-events-none ${nodeDef.contentClass || ''}`}>
+                        <div className={`flex items-center space-x-2 ${isSelected ? 'scale-105' : ''} transition-transform`}>
+                          <i className={`fa-solid ${nodeDef.iconClass} opacity-70 w-4 text-center`}></i>
+                          <div className="font-bold text-sm truncate max-w-[120px]">{node.data.label}</div>
+                        </div>
+                      </div>
+
+                      {/* Bottom Port (Source) */}
+                      <div 
+                        className={`absolute -bottom-3 left-1/2 -translate-x-1/2 w-4 h-4 bg-gray-300 border-2 border-white rounded-full ${mode === 'edit' ? 'hover:bg-blue-500 hover:scale-125 cursor-crosshair' : 'hidden'} transition-all z-20`}
+                        onMouseDown={(e) => onPortMouseDown(e, node.id, true)}
+                      />
+
+                      {/* Floating Description */}
+                      {node.data.description && (
+                        <div className="absolute top-full left-1/2 -translate-x-1/2 mt-5 w-48 p-2 bg-gray-800 text-white text-xs rounded-lg shadow-xl z-50 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none before:content-[''] before:absolute before:-top-2 before:left-1/2 before:-translate-x-1/2 before:border-4 before:border-transparent before:border-b-gray-800">
+                          {node.data.description}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Context Menu */}
+              {contextMenu && mode === 'edit' && (
+                <div 
+                  className="context-menu absolute bg-white border border-gray-200 rounded-lg shadow-xl py-1 z-50 w-40 overflow-hidden"
+                  style={{ top: contextMenu.top, left: contextMenu.left }}
+                  onMouseDown={(e) => e.stopPropagation()}
+                >
+                  <button
+                    onMouseDown={(e) => { e.stopPropagation(); deleteNode(); }}
+                    className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center transition-colors"
+                  >
+                    <i className="fa-solid fa-trash mr-2"></i> {t.deleteNode}
+                  </button>
+                </div>
+              )}
+            </main>
+
+            {/* Right Sidebar (Property Panel) */}
+            <aside className={`w-80 bg-white border-l border-gray-200 p-6 flex flex-col z-20 shadow-[-4px_0_24px_rgba(0,0,0,0.02)] transition-transform duration-300 absolute right-0 h-full ${selectedNode ? 'translate-x-0' : 'translate-x-full'}`}>
+              {selectedNode && (
+                <>
+                  <div className="flex items-center justify-between mb-6 pb-4 border-b border-gray-100">
+                    <h2 className="text-sm font-bold text-gray-800 uppercase tracking-wider flex items-center">
+                      <i className="fa-solid fa-gear mr-2 text-blue-500"></i> {t.properties}
+                    </h2>
+                    <button onClick={() => setSelectedNodeId(null)} className="p-1 text-gray-400 hover:text-gray-600 rounded-md hover:bg-gray-100 transition-colors">
+                      <i className="fa-solid fa-xmark"></i>
+                    </button>
+                  </div>
+
+                  <div className="space-y-5">
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase">{t.nodeLabel}</label>
+                      {mode === 'edit' ? (
+                        <input
+                          type="text"
+                          value={selectedNode.data.label}
+                          onChange={(e) => updateNodeData(selectedNode.id, 'label', e.target.value)}
+                          className="w-full px-3 py-2 bg-gray-50 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                          placeholder={t.placeholderName}
+                        />
+                      ) : (
+                        <div className="w-full px-3 py-2 bg-gray-50 border border-transparent rounded-lg text-sm text-gray-800 font-medium">
+                          {selectedNode.data.label}
+                        </div>
+                      )}
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase">{t.description}</label>
+                      {mode === 'edit' ? (
+                        <textarea
+                          value={selectedNode.data.description || ''}
+                          onChange={(e) => updateNodeData(selectedNode.id, 'description', e.target.value)}
+                          rows={4}
+                          className="w-full px-3 py-2 bg-gray-50 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all resize-none"
+                          placeholder={t.placeholderDesc}
+                        />
+                      ) : (
+                        <div className="w-full px-3 py-2 bg-gray-50 border border-transparent rounded-lg text-sm text-gray-700 whitespace-pre-wrap min-h-[6rem]">
+                          {selectedNode.data.description || <span className="text-gray-400 italic">{t.noDesc}</span>}
+                        </div>
+                      )}
+                    </div>
+                    
+                    <div className="pt-4 mt-4 border-t border-gray-100">
+                       <div className="text-xs text-gray-400 flex items-center justify-between">
+                         <span>{t.nodeId}</span>
+                         <span className="font-mono bg-gray-100 px-2 py-0.5 rounded truncate max-w-[150px]">{selectedNode.id}</span>
+                       </div>
+                       <div className="text-xs text-gray-400 flex items-center justify-between mt-2">
+                         <span>{t.type}</span>
+                         <span className="capitalize">{selectedNode.data.nodeType}</span>
+                       </div>
+                    </div>
+                  </div>
+                </>
+              )}
+            </aside>
+
+            {/* Global Toast Notification */}
+            {toastMessage && (
+              <div className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-gray-800 text-white px-6 py-3 rounded-full shadow-lg text-sm font-medium animate-bounce z-50">
+                {toastMessage}
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<AppArchitect />);
+  </script>
+</body>
+</html>
