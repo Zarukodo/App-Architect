@@ -292,7 +292,7 @@
           setTransform({ x: 0, y: 0, scale: 1 });
           syncToCloud(newNodes, edges);
         }
-      }, [layoutMode, edges, syncToCloud]);
+      }, [layoutMode]);
 
       const getCanvasCoords = (e) => {
         const rect = canvasRef.current.getBoundingClientRect();
