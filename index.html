@@ -7,8 +7,6 @@
   
   <!-- Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com"></script>
-  <!-- Dagre for Auto Layout -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/dagre/0.8.5/dagre.min.js"></script>
   
   <!-- FontAwesome for Icons -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -20,17 +18,22 @@
   <!-- Babel for in-browser JSX compilation -->
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
+  <!-- HTML to Image -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html-to-image/1.11.11/html-to-image.min.js"></script>
+  
+  <!-- Firebase -->
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
+
+  <!-- Dagre for Auto Layout -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/dagre/0.8.5/dagre.min.js"></script>
 
   <style>
     body {
       margin: 0;
       font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     }
-    /* Hide scrollbars for the main app to act like a canvas tool */
     ::-webkit-scrollbar {
       width: 8px;
       height: 8px;
@@ -138,68 +141,36 @@
     const NODE_WIDTH = 180;
     const NODE_HEIGHT = 60;
 
-    const calculateTreeLayout = (nodes, edges) => {
-      if (nodes.length === 0) return nodes;
-
-      const targets = new Set(edges.map(e => e.target));
-      const roots = nodes.filter(n => !targets.has(n.id));
-      
-      const levels = {};
-      const nodeToLevel = {};
-
-      const assignLevel = (nodeId, level) => {
-        if (!levels[level]) levels[level] = [];
-        if (!levels[level].includes(nodeId)) {
-          levels[level].push(nodeId);
-          nodeToLevel[nodeId] = level;
-        }
-        const children = edges.filter(e => e.source === nodeId).map(e => e.target);
-        children.forEach(childId => assignLevel(childId, level + 1));
-      };
-
-      if (roots.length > 0) {
-        roots.forEach(r => assignLevel(r.id, 0));
-      } else {
-        assignLevel(nodes[0].id, 0);
-      }
-
-      nodes.forEach(n => {
-        if (nodeToLevel[n.id] === undefined) assignLevel(n.id, 0);
-      });
-
-      const newNodes = [...nodes];
-      const LEVEL_HEIGHT = 120;
-      const SPACING = 60;
-
-      Object.keys(levels).forEach(levelStr => {
-        const level = parseInt(levelStr);
-        const levelNodes = levels[levelStr];
-        const totalWidth = levelNodes.length * NODE_WIDTH + (levelNodes.length - 1) * SPACING;
-        let startX = -totalWidth / 2 + NODE_WIDTH / 2 + 400;
-
-        levelNodes.forEach(nodeId => {
-          const nodeIndex = newNodes.findIndex(n => n.id === nodeId);
-          if (nodeIndex !== -1) {
-            newNodes[nodeIndex] = {
-              ...newNodes[nodeIndex],
-              x: startX,
-              y: level * LEVEL_HEIGHT + 100
-            };
-          }
-          startX += NODE_WIDTH + SPACING;
-        });
-      });
-
-      return newNodes;
-    };
-
+    // 保留原始曲線當作反向拉線的備用方案
     const getBezierPath = (startX, startY, endX, endY, isBackward = false) => {
       const deltaY = Math.abs(endY - startY);
       const controlOffset = Math.max(deltaY / 2, 40);
-      // 如果是反向線 (下往上拉)，控制點要往反方向推，曲線才會漂亮
       const cp1Y = isBackward ? startY - controlOffset : startY + controlOffset;
       const cp2Y = isBackward ? endY + controlOffset : endY - controlOffset;
       return `M ${startX},${startY} C ${startX},${cp1Y} ${endX},${cp2Y} ${endX},${endY}`;
+    };
+
+    // 新的直角折線演算法
+    const getStepPath = (startX, startY, endX, endY, isBackward = false) => {
+      if (isBackward) return getBezierPath(startX, startY, endX, endY, true); 
+      
+      const midY = startY + (endY - startY) / 2;
+      const r = 12; // 圓角大小
+      
+      // 如果幾乎是垂直的，直接畫直線
+      if (Math.abs(startX - endX) < r * 2) {
+         return `M ${startX},${startY} L ${endX},${endY}`;
+      }
+
+      const dirX = endX > startX ? 1 : -1;
+      
+      // 使用 Quadratic Bezier (Q) 畫出滑順的 90 度圓角轉折
+      return `M ${startX},${startY} 
+              L ${startX},${midY - r}
+              Q ${startX},${midY} ${startX + r * dirX},${midY}
+              L ${endX - r * dirX},${midY}
+              Q ${endX},${midY} ${endX},${midY + r}
+              L ${endX},${endY}`;
     };
 
     function AppArchitect() {
@@ -252,7 +223,7 @@
       const [nodes, setNodes] = useState([]);
       const [edges, setEdges] = useState([]);
       const [mode, setMode] = useState('edit');
-      const [layoutMode, setLayoutMode] = useState('flow');
+      const [layoutMode, setLayoutMode] = useState('tree'); // 預設改成樹狀
       
       const [selectedNodeId, setSelectedNodeId] = useState(null);
       const [contextMenu, setContextMenu] = useState(null);
@@ -289,15 +260,6 @@
         navigator.clipboard.writeText(url.toString());
         showToast(lang === 'zh' ? '已複製房間連結！傳給朋友加入吧。' : 'Room link copied!');
       };
-
-      useEffect(() => {
-        if (layoutMode === 'tree' && nodes.length > 0) {
-          const newNodes = calculateTreeLayout(nodes, edges);
-          setNodes(newNodes);
-          setTransform({ x: 0, y: 0, scale: 1 });
-          syncToCloud(newNodes, edges);
-        }
-      }, [layoutMode]);
 
       const getCanvasCoords = (e) => {
         const rect = canvasRef.current.getBoundingClientRect();
@@ -364,56 +326,51 @@
         }
       };
 
+      // 導入 Dagre 取代原本的 BFS
       const handleAutoLayout = () => {
         if (nodes.length === 0) return;
+        
+        if (!window.dagre) {
+           console.error("Dagre library is not loaded.");
+           return;
+        }
 
-        // 1. 建立一個有向圖物件
         const g = new dagre.graphlib.Graph();
         
-        // 設定圖形的整體佈局參數
         g.setGraph({
-          rankdir: 'TB', // 從上到下 (Top to Bottom)
-          nodesep: 80,   // 同層節點之間的水平間距
-          ranksep: 120,  // 層級與層級之間的垂直間距
+          rankdir: 'TB',
+          nodesep: 60,   
+          ranksep: 100,  
           marginx: 50,
           marginy: 50
         });
         g.setDefaultEdgeLabel(() => ({}));
 
-        // 2. 將節點餵給 Dagre
-        // 注意：必須告訴它節點的長寬，它才能幫你算好避讓空間
         nodes.forEach(node => {
           g.setNode(node.id, { width: NODE_WIDTH, height: NODE_HEIGHT });
         });
 
-        // 3. 將連線餵給 Dagre
         edges.forEach(edge => {
           g.setEdge(edge.source, edge.target);
         });
 
-        // 4. 讓 Dagre 施展魔法，計算所有節點的座標
         dagre.layout(g);
 
-        // 5. 把 Dagre 算出來的座標套用回我們的 nodes 狀態
-        const centerX = 400; // 給個初始的水平偏移量，避免太靠左邊緣
-        
         const newNodes = nodes.map(node => {
           const nodeWithPos = g.node(node.id);
           return {
             ...node,
-            // 關鍵：Dagre 算出的 x, y 是「節點中心點」，但我們 div 渲染是用「左上角」
-            // 所以必須減去長寬的一半，把座標校正回左上角
-            x: nodeWithPos.x - NODE_WIDTH / 2 + centerX, 
+            x: nodeWithPos.x - NODE_WIDTH / 2 + 300, 
             y: nodeWithPos.y - NODE_HEIGHT / 2 + 100
           };
         });
 
-        // 6. 更新狀態
         setNodes(newNodes);
-        setTransform({ x: 0, y: 0, scale: 1 }); // 排版完把視角歸位
+        setTransform({ x: 0, y: 0, scale: 1 });
         showToast(t.layoutOrganized);
         syncToCloud(newNodes, edges);
       };
+
       const onCanvasContextMenu = (e) => {
         e.preventDefault();
         if (mode === 'view') return;
@@ -526,7 +483,6 @@
         
         const node = nodes.find(n => n.id === nodeId);
         const startX = node.x + NODE_WIDTH / 2;
-        // 依照點擊的是上面還是下面，決定線的起始點
         const startY = position === 'top' ? node.y - 15 : node.y + NODE_HEIGHT + 15;
         
         setDrawingEdge({ source: nodeId, startX, startY, currentX: startX, currentY: startY });
@@ -735,25 +691,6 @@
 
               <div className="w-px h-6 bg-gray-300 mx-2"></div>
 
-              <div className="flex bg-gray-100 p-1 rounded-lg border border-gray-200">
-                <button
-                  onClick={() => setLayoutMode('flow')}
-                  className={`flex items-center px-3 py-1.5 rounded-md text-sm font-medium transition-all ${layoutMode === 'flow' ? 'bg-white shadow-sm text-gray-800' : 'text-gray-500 hover:text-gray-700'}`}
-                  title="Free Flow Layout"
-                >
-                  <i className="fa-solid fa-code-branch"></i>
-                </button>
-                <button
-                  onClick={() => setLayoutMode('tree')}
-                  className={`flex items-center px-3 py-1.5 rounded-md text-sm font-medium transition-all ${layoutMode === 'tree' ? 'bg-white shadow-sm text-gray-800' : 'text-gray-500 hover:text-gray-700'}`}
-                  title="Auto Tree Layout"
-                >
-                  <i className="fa-solid fa-sitemap"></i>
-                </button>
-              </div>
-
-              <div className="w-px h-6 bg-gray-300 mx-2"></div>
-              
               <button 
                 onClick={handleAutoLayout} 
                 className="flex items-center px-3 py-1.5 text-sm font-medium text-white bg-emerald-500 rounded-lg hover:bg-emerald-600 transition-colors shadow-sm"
@@ -836,14 +773,22 @@
                     const endX = targetNode.x + NODE_WIDTH / 2;
                     const endY = targetNode.y - 15;
 
+                    // 判斷跨層過大的連線，虛化處理
+                    const isLongDistance = Math.abs(targetNode.y - sourceNode.y) > (NODE_HEIGHT + 150);
+                    const strokeColor = isLongDistance ? "#cbd5e1" : "#94a3b8"; // 淡灰色 vs 原本顏色
+                    const strokeWidth = isLongDistance ? "2" : "3";
+                    const strokeDash = isLongDistance ? "6,6" : "none";
+                    const markerId = isLongDistance ? "arrow-light" : "arrow";
+
                     return (
                       <path 
                         key={edge.id}
-                        d={getBezierPath(startX, startY, endX, endY)}
+                        d={layoutMode === 'tree' ? getStepPath(startX, startY, endX, endY, isBackward) : getBezierPath(startX, startY, endX, endY, isBackward)}
                         fill="none"
-                        stroke="#94a3b8"
-                        strokeWidth="4"
-                        markerEnd="url(#arrow)"
+                        stroke={strokeColor}
+                        strokeWidth={strokeWidth}
+                        strokeDasharray={strokeDash}
+                        markerEnd={`url(#${markerId})`}
                         className="transition-all duration-300 pointer-events-auto cursor-pointer hover:stroke-blue-400"
                         onContextMenu={(e) => onEdgeContextMenu(e, edge)}
                       />
@@ -852,7 +797,7 @@
                   
                   {drawingEdge && (
                     <path 
-                      d={getBezierPath(drawingEdge.startX, drawingEdge.startY, drawingEdge.currentX, drawingEdge.currentY, drawingEdge.startY > drawingEdge.currentY)}
+                      d={getStepPath(drawingEdge.startX, drawingEdge.startY, drawingEdge.currentX, drawingEdge.currentY, drawingEdge.startY > drawingEdge.currentY)}
                       fill="none"
                       stroke="#3b82f6"
                       strokeWidth="2"
@@ -864,6 +809,9 @@
                     <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
                       <path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8" />
                     </marker>
+                    <marker id="arrow-light" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                      <path d="M 0 0 L 10 5 L 0 10 z" fill="#cbd5e1" />
+                    </marker>
                   </defs>
                 </svg>
                 
@@ -871,7 +819,6 @@
                   const sourceNode = nodes.find(n => n.id === edge.source);
                   const targetNode = nodes.find(n => n.id === edge.target);
                   if (!sourceNode || !targetNode) return null;
-                  const isBackward = sourceNode.y > targetNode.y;
                   const startX = sourceNode.x + NODE_WIDTH / 2;
                   const startY = sourceNode.y + NODE_HEIGHT + 15;
                   const endX = targetNode.x + NODE_WIDTH / 2;
