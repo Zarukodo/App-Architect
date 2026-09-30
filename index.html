@@ -756,6 +756,51 @@
                   );
                 })}
               </div>
+              {contextMenu && mode === 'edit' && (
+                <div 
+                  className="context-menu absolute bg-white border border-gray-200 rounded-lg shadow-xl py-1 z-50 w-40 overflow-hidden"
+                  style={{ top: contextMenu.top, left: contextMenu.left }}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onContextMenu={(e) => e.preventDefault()}
+                >
+                  {contextMenu.type === 'canvas' && (
+                    <button
+                      onMouseDown={(e) => { e.stopPropagation(); handleContextMenuAction('paste'); }}
+                      disabled={!clipboard}
+                      className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center transition-colors disabled:opacity-40 disabled:hover:bg-white disabled:cursor-not-allowed"
+                    >
+                      <i className="fa-solid fa-paste mr-2"></i> {t.paste}
+                    </button>
+                  )}
+                  
+                  {contextMenu.type === 'node' && (
+                    <>
+                      <button
+                        onMouseDown={(e) => { e.stopPropagation(); handleContextMenuAction('copy'); }}
+                        className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center transition-colors"
+                      >
+                        <i className="fa-solid fa-copy mr-2"></i> {t.copy}
+                      </button>
+                      <button
+                        onMouseDown={(e) => { e.stopPropagation(); handleContextMenuAction('cut'); }}
+                        className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center transition-colors"
+                      >
+                        <i className="fa-solid fa-cut mr-2"></i> {t.cut}
+                      </button>
+                      <div className="border-t border-gray-100 my-1"></div>
+                    </>
+                  )}
+
+                  {(contextMenu.type === 'node' || contextMenu.type === 'edge') && (
+                    <button
+                      onMouseDown={(e) => { e.stopPropagation(); handleContextMenuAction('delete'); }}
+                      className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center transition-colors"
+                    >
+                      <i className="fa-solid fa-trash mr-2"></i> {t.delete}
+                    </button>
+                  )}
+                </div>
+              )}
             </main>
 
             <aside className={`w-80 bg-white border-l border-gray-200 p-6 flex flex-col z-20 shadow-[-4px_0_24px_rgba(0,0,0,0.02)] transition-transform duration-300 absolute right-0 h-full ${selectedNode ? 'translate-x-0' : 'translate-x-full'}`}>
