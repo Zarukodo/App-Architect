@@ -17,10 +17,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/dagre/0.8.5/dagre.min.js"></script>
 
   <style>
-    body {
-      margin: 0;
-      font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    }
+    body { margin: 0; font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
     ::-webkit-scrollbar { width: 8px; height: 8px; }
     ::-webkit-scrollbar-track { background: #f1f5f9; }
     ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
@@ -128,10 +125,13 @@
 
     const getStepPath = (startX, startY, endX, endY, isBackward = false, offsetY = 0) => {
       if (isBackward) return getBezierPath(startX, startY, endX, endY, true); 
-      const midY = startY + (endY - startY) / 2 + offsetY;
+      
+      let midY = startY + 40 + offsetY;
+      if (midY > endY - 20) midY = startY + (endY - startY) / 2;
+      
       const r = 12;
       if (Math.abs(startX - endX) < r * 2) {
-        return `M ${startX},${startY} L ${endX},${endY}`;
+         return `M ${startX},${startY} L ${endX},${endY}`;
       }
       const dirX = endX > startX ? 1 : -1;
       return `M ${startX},${startY} 
@@ -171,15 +171,13 @@
           .then(() => {
             const db = firebase.database();
             const roomRef = db.ref(`architect_rooms/${currentRoom}`);
-
             roomRef.on('value', (snapshot) => {
               const data = snapshot.val();
               if (data) {
                 setNodes(prev => JSON.stringify(prev) !== JSON.stringify(data.nodes || []) ? (data.nodes || []) : prev);
                 setEdges(prev => JSON.stringify(prev) !== JSON.stringify(data.edges || []) ? (data.edges || []) : prev);
               } else {
-                setNodes([]);
-                setEdges([]);
+                setNodes([]); setEdges([]);
               }
             });
             return () => roomRef.off();
@@ -316,18 +314,51 @@
         syncToCloud(newNodes, edges);
       };
 
+      const togglePortal = (nodeId) => {
+        const node = nodes.find(n => n.id === nodeId);
+        if (!node) return;
+
+        const isCurrentlyPortal = node.data.isPortalOut;
+
+        if (!isCurrentlyPortal) {
+          const cloneId = `portal_in_${nodeId}`;
+          const cloneNode = {
+            id: cloneId,
+            x: node.x + 300, 
+            y: node.y,
+            data: {
+              ...node.data,
+              isPortalIn: true,
+              portalSource: nodeId,
+              label: `[接續] ${node.data.label}`
+            }
+          };
+          
+          const newNodes = [...nodes.map(n => n.id === nodeId ? { ...n, data: { ...n.data, isPortalOut: true } } : n), cloneNode];
+          const newEdges = edges.map(e => e.source === nodeId ? { ...e, source: cloneId } : e);
+          
+          setNodes(newNodes);
+          setEdges(newEdges);
+          syncToCloud(newNodes, newEdges);
+          showToast('傳送門已建立！建議點擊「一鍵整理」重新排版。');
+        } else {
+          const cloneId = `portal_in_${nodeId}`;
+          const newNodes = nodes.map(n => n.id === nodeId ? { ...n, data: { ...n.data, isPortalOut: false } } : n).filter(n => n.id !== cloneId);
+          const newEdges = edges.map(e => e.source === cloneId ? { ...e, source: nodeId } : e);
+          
+          setNodes(newNodes);
+          setEdges(newEdges);
+          syncToCloud(newNodes, newEdges);
+          showToast('傳送門已關閉，節點已重新接合！');
+        }
+      };
+
       const onCanvasContextMenu = (e) => {
         e.preventDefault();
         if (mode === 'view') return;
         const rect = canvasRef.current.getBoundingClientRect();
         const coords = getCanvasCoords(e);
-        setContextMenu({
-          type: 'canvas',
-          top: e.clientY - rect.top,
-          left: e.clientX - rect.left,
-          dropX: coords.x,
-          dropY: coords.y
-        });
+        setContextMenu({ type: 'canvas', top: e.clientY - rect.top, left: e.clientX - rect.left, dropX: coords.x, dropY: coords.y });
       };
 
       const onNodeMouseDown = (e, node) => {
@@ -363,14 +394,12 @@
           if (contextMenu.type === 'node') {
             const newNodes = nodes.filter(node => node.id !== contextMenu.id);
             const newEdges = edges.filter(edge => edge.source !== contextMenu.id && edge.target !== contextMenu.id);
-            setNodes(newNodes);
-            setEdges(newEdges);
+            setNodes(newNodes); setEdges(newEdges);
             if (selectedNodeId === contextMenu.id) setSelectedNodeId(null);
             syncToCloud(newNodes, newEdges);
           } else if (contextMenu.type === 'edge') {
             const newEdges = edges.filter(edge => edge.id !== contextMenu.id);
-            setEdges(newEdges);
-            syncToCloud(nodes, newEdges);
+            setEdges(newEdges); syncToCloud(nodes, newEdges);
           }
         } 
         else if (action === 'copy' || action === 'cut') {
@@ -380,8 +409,7 @@
             if (action === 'cut') {
               const newNodes = nodes.filter(node => node.id !== contextMenu.id);
               const newEdges = edges.filter(edge => edge.source !== contextMenu.id && edge.target !== contextMenu.id);
-              setNodes(newNodes);
-              setEdges(newEdges);
+              setNodes(newNodes); setEdges(newEdges);
               if (selectedNodeId === contextMenu.id) setSelectedNodeId(null);
               syncToCloud(newNodes, newEdges);
             }
@@ -389,15 +417,9 @@
         } 
         else if (action === 'paste') {
           if (!clipboard) return;
-          const newNode = {
-            ...clipboard.node,
-            id: `node_${Date.now()}`,
-            x: contextMenu.dropX - NODE_WIDTH / 2,
-            y: contextMenu.dropY - NODE_HEIGHT / 2,
-          };
+          const newNode = { ...clipboard.node, id: `node_${Date.now()}`, x: contextMenu.dropX - NODE_WIDTH / 2, y: contextMenu.dropY - NODE_HEIGHT / 2 };
           const newNodes = [...nodes, newNode];
-          setNodes(newNodes);
-          syncToCloud(newNodes, edges);
+          setNodes(newNodes); syncToCloud(newNodes, edges);
           if (clipboard.action === 'cut') setClipboard(null); 
         }
         setContextMenu(null);
@@ -424,16 +446,10 @@
           const edgeExists = edges.some(edge => edge.source === drawingEdge.source && edge.target === nodeId);
           if (!edgeExists) {
             const sourceNode = nodes.find(n => n.id === drawingEdge.source);
-            const parentColor = sourceNode?.data?.color; // 取得父節點顏色
+            const parentColor = sourceNode?.data?.color; 
 
-            const newEdge = { 
-              id: `edge_${Date.now()}`, 
-              source: drawingEdge.source, 
-              target: nodeId,
-              color: parentColor 
-            };
+            const newEdge = { id: `edge_${Date.now()}`, source: drawingEdge.source, target: nodeId, color: parentColor };
             
-            // 自動改變子節點的顏色以繼承父節點
             let newNodes = nodes;
             if (parentColor) {
               newNodes = nodes.map(n => n.id === nodeId ? { ...n, data: { ...n.data, color: parentColor } } : n);
@@ -473,17 +489,14 @@
 
       const updateNodeData = (id, field, value) => {
         const newNodes = nodes.map(node => node.id === id ? { ...node, data: { ...node.data, [field]: value } } : node);
-        setNodes(newNodes);
-        syncToCloud(newNodes, edges);
+        setNodes(newNodes); syncToCloud(newNodes, edges);
       };
 
       const updateEdgeLabel = (id, label) => {
         const newEdges = edges.map(edge => edge.id === id ? { ...edge, label } : edge);
-        setEdges(newEdges);
-        syncToCloud(nodes, newEdges);
+        setEdges(newEdges); syncToCloud(nodes, newEdges);
       };
 
-      // 遞迴將顏色套用到所有子分支
       const applyColorToBranch = (startId, colorToApply) => {
         if(!colorToApply) return;
         const nodesToColor = new Set([startId]);
@@ -506,9 +519,7 @@
         const newNodes = nodes.map(n => nodesToColor.has(n.id) ? { ...n, data: { ...n.data, color: colorToApply } } : n);
         const newEdges = edges.map(e => edgesToColor.has(e.id) ? { ...e, color: colorToApply } : e);
         
-        setNodes(newNodes);
-        setEdges(newEdges);
-        syncToCloud(newNodes, newEdges);
+        setNodes(newNodes); setEdges(newEdges); syncToCloud(newNodes, newEdges);
         showToast(lang === 'zh' ? '分支顏色已同步更新！' : 'Branch colors updated!');
       };
 
@@ -517,11 +528,8 @@
         const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
-        link.href = url;
-        link.download = 'ia-user-flow-project.json';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
+        link.href = url; link.download = 'ia-user-flow-project.json';
+        document.body.appendChild(link); link.click(); document.body.removeChild(link);
         showToast(t.exportSuccess);
       };
 
@@ -670,47 +678,21 @@
             
             {mode === 'edit' && (
               <aside className="w-64 bg-white border-r border-gray-200 p-4 flex flex-col z-10 shadow-[4px_0_24px_rgba(0,0,0,0.02)]">
-                <h2 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4 flex items-center">
-                  <i className="fa-solid fa-cubes mr-2"></i> {t.components}
-                </h2>
+                <h2 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4 flex items-center"><i className="fa-solid fa-cubes mr-2"></i> {t.components}</h2>
                 <div className="space-y-3">
-                  {NODE_TYPES.map((node) => {
-                    return (
-                      <div
-                        key={node.type}
-                        draggable
-                        onDragStart={(e) => onDragStartSidebar(e, node)}
-                        className={`flex items-center p-3 rounded-lg border cursor-grab active:cursor-grabbing hover:-translate-y-0.5 transition-transform ${node.color}`}
-                      >
-                        <i className={`fa-solid ${node.iconClass} mr-3 opacity-70 w-4 text-center`}></i>
-                        <span className="font-semibold text-sm">{node.label}</span>
-                      </div>
-                    );
-                  })}
+                  {NODE_TYPES.map((node) => (
+                    <div key={node.type} draggable onDragStart={(e) => onDragStartSidebar(e, node)} className={`flex items-center p-3 rounded-lg border cursor-grab hover:-translate-y-0.5 transition-transform ${node.color}`}>
+                      <i className={`fa-solid ${node.iconClass} mr-3 opacity-70 w-4 text-center`}></i>
+                      <span className="font-semibold text-sm">{node.label}</span>
+                    </div>
+                  ))}
                 </div>
               </aside>
             )}
 
-            <main 
-              className="flex-1 relative bg-[#fafafa] overflow-hidden" 
-              ref={canvasRef}
-              onMouseDown={onCanvasMouseDown}
-              onMouseMove={onCanvasMouseMove}
-              onMouseUp={onCanvasMouseUp}
-              onMouseLeave={onCanvasMouseUp}
-              onWheel={onCanvasWheel}
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={onCanvasDrop}
-              onContextMenu={onCanvasContextMenu}
-              style={{ backgroundImage: 'radial-gradient(#e2e8f0 1px, transparent 1px)', backgroundSize: `${20 * transform.scale}px ${20 * transform.scale}px`, backgroundPosition: `${transform.x}px ${transform.y}px` }}
-            >
-              <div 
-                className="absolute origin-top-left will-change-transform"
-                style={{ 
-                  transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`,
-                  width: '100%', height: '100%'
-                }}
-              >
+            <main className="flex-1 relative bg-[#fafafa] overflow-hidden" ref={canvasRef} onMouseDown={onCanvasMouseDown} onMouseMove={onCanvasMouseMove} onMouseUp={onCanvasMouseUp} onMouseLeave={onCanvasMouseUp} onWheel={onCanvasWheel} onDragOver={(e) => e.preventDefault()} onDrop={onCanvasDrop} onContextMenu={onCanvasContextMenu} style={{ backgroundImage: 'radial-gradient(#e2e8f0 1px, transparent 1px)', backgroundSize: `${20 * transform.scale}px ${20 * transform.scale}px`, backgroundPosition: `${transform.x}px ${transform.y}px` }}>
+              <div className="absolute origin-top-left will-change-transform" style={{ transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`, width: '100%', height: '100%' }}>
+                
                 <svg className="absolute top-0 left-0 w-full h-full pointer-events-none overflow-visible">
                   {edges.map(edge => {
                     const sourceNode = nodes.find(n => n.id === edge.source);
@@ -722,11 +704,9 @@
                     const endX = targetNode.x + NODE_WIDTH / 2;
                     const endY = targetNode.y - 15;
 
-                    // --- 計算平行走線的偏移量 ---
                     const siblingEdges = edges.filter(e => e.source === edge.source);
                     const siblingIndex = siblingEdges.findIndex(e => e.id === edge.id);
                     const totalSiblings = siblingEdges.length;
-                    // 根據排行，把水平線上下撐開 (間距 12px)
                     const offsetY = totalSiblings > 1 ? (siblingIndex - (totalSiblings - 1) / 2) * 12 : 0;
 
                     const isLongDistance = Math.abs(targetNode.y - sourceNode.y) > (NODE_HEIGHT + 150);
@@ -736,237 +716,85 @@
 
                     return (
                       <g key={edge.id}>
-                        <path 
-                          d={layoutMode === 'tree' ? getStepPath(startX, startY, endX, endY, isBackward, offsetY) : getBezierPath(startX, startY, endX, endY, isBackward)}
-                          fill="none"
-                          stroke={strokeColor}
-                          strokeWidth={strokeWidth}
-                          strokeDasharray={strokeDash}
-                          markerEnd={`url(#arrow-${edge.id})`}
-                          className="transition-all duration-300 pointer-events-auto cursor-pointer hover:stroke-blue-400"
-                          onContextMenu={(e) => onEdgeContextMenu(e, edge)}
-                        />
-                        <defs>
-                          <marker id={`arrow-${edge.id}`} viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-                            <path d="M 0 0 L 10 5 L 0 10 z" fill={strokeColor} />
-                          </marker>
-                        </defs>
+                        <path d={layoutMode === 'tree' ? getStepPath(startX, startY, endX, endY, isBackward, offsetY) : getBezierPath(startX, startY, endX, endY, isBackward)} fill="none" stroke={strokeColor} strokeWidth={strokeWidth} strokeDasharray={strokeDash} markerEnd={`url(#arrow-${edge.id})`} className="transition-all duration-300 pointer-events-auto cursor-pointer hover:stroke-blue-400" onContextMenu={(e) => onEdgeContextMenu(e, edge)} />
+                        <defs><marker id={`arrow-${edge.id}`} viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill={strokeColor} /></marker></defs>
                       </g>
                     );
                   })}
-                  
-                  {drawingEdge && (
-                    <path 
-                      d={getStepPath(drawingEdge.startX, drawingEdge.startY, drawingEdge.currentX, drawingEdge.currentY, drawingEdge.startY > drawingEdge.currentY, 0)}
-                      fill="none"
-                      stroke="#3b82f6"
-                      strokeWidth="2"
-                      strokeDasharray="5,5"
-                    />
-                  )}
                 </svg>
-                
-                {edges.map(edge => {
-                  const sourceNode = nodes.find(n => n.id === edge.source);
-                  const targetNode = nodes.find(n => n.id === edge.target);
-                  if (!sourceNode || !targetNode) return null;
-                  const startX = sourceNode.x + NODE_WIDTH / 2;
-                  const startY = sourceNode.y + NODE_HEIGHT + 15;
-                  const endX = targetNode.x + NODE_WIDTH / 2;
-                  const endY = targetNode.y - 15;
-                  
-                  // 標籤文字也需要吃到同一個偏移量，才會剛好卡在線上
-                  const siblingEdges = edges.filter(e => e.source === edge.source);
-                  const siblingIndex = siblingEdges.findIndex(e => e.id === edge.id);
-                  const totalSiblings = siblingEdges.length;
-                  const offsetY = totalSiblings > 1 ? (siblingIndex - (totalSiblings - 1) / 2) * 12 : 0;
-                  
-                  const midX = (startX + endX) / 2;
-                  const midY = (startY + endY) / 2 + offsetY;
-
-                  return (
-                    <div
-                      key={`label_${edge.id}`}
-                      className="absolute z-10 flex items-center justify-center -translate-x-1/2 -translate-y-1/2"
-                      style={{ left: midX, top: midY }}
-                    >
-                      {mode === 'edit' ? (
-                        <input
-                          type="text"
-                          value={edge.label || ''}
-                          onChange={(e) => updateEdgeLabel(edge.id, e.target.value)}
-                          onMouseDown={(e) => e.stopPropagation()} 
-                          placeholder={t.edgeLabel}
-                          className="px-2 py-0.5 text-xs bg-white/80 backdrop-blur-sm border border-transparent hover:border-blue-300 focus:border-blue-500 focus:bg-white rounded shadow-sm outline-none transition-all w-20 focus:w-32 text-center text-gray-700 placeholder-gray-400 font-medium"
-                          style={edge.color ? { color: edge.color, borderColor: edge.color } : {}}
-                        />
-                      ) : (
-                        edge.label && (
-                          <div 
-                            className="px-2 py-0.5 text-xs bg-white/90 backdrop-blur-sm border rounded shadow-sm font-medium font-mono"
-                            style={edge.color ? { color: edge.color, borderColor: edge.color } : { borderColor: '#e5e7eb', color: '#374151' }}
-                          >
-                            {edge.label}
-                          </div>
-                        )
-                      )}
-                    </div>
-                  );
-                })}
 
                 {nodes.map(node => {
                   const nodeDef = NODE_TYPES.find(n => n.type === node.data.nodeType) || NODE_TYPES[0];
                   const isSelected = selectedNodeId === node.id;
                   const customColor = node.data.color;
+                  const customStyle = customColor ? { borderColor: customColor, backgroundColor: `${customColor}1A` } : {};
                   
-                  // 若有自訂顏色，則覆蓋預設的 tailwind 顏色，底色抓 10% 透明度 (HEX + 1A)
-                  const customStyle = customColor ? {
-                    borderColor: customColor,
-                    backgroundColor: `${customColor}1A`
-                  } : {};
+                  const isPortalOut = node.data.isPortalOut;
+                  const isPortalIn = node.data.isPortalIn;
                   
                   return (
-                    <div
-                      key={node.id}
-                      className={`canvas-element absolute group ${mode === 'edit' ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} transition-shadow`}
-                      style={{ left: node.x, top: node.y, width: NODE_WIDTH, height: NODE_HEIGHT }}
-                      onMouseDown={(e) => onNodeMouseDown(e, node)}
-                      onContextMenu={(e) => onNodeContextMenu(e, node)}
-                    >
-                      <div 
-                        className={`absolute inset-0 border-2 shadow-sm transition-all ${!customColor ? nodeDef.color : ''} ${!customColor ? 'bg-white' : ''} ${nodeDef.shapeClass || 'rounded-xl'} ${isSelected ? 'ring-4 ring-opacity-50 ring-blue-400 scale-105 shadow-md' : ''}`}
-                        style={customStyle}
-                      />
+                    <div key={node.id} className={`canvas-element absolute group ${mode === 'edit' ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} transition-shadow`} style={{ left: node.x, top: node.y, width: NODE_WIDTH, height: NODE_HEIGHT }} onMouseDown={(e) => onNodeMouseDown(e, node)} onContextMenu={(e) => onNodeContextMenu(e, node)}>
+                      <div className={`absolute inset-0 border-2 shadow-sm transition-all ${!customColor ? nodeDef.color : ''} ${!customColor ? 'bg-white' : ''} ${nodeDef.shapeClass || 'rounded-xl'} ${isSelected ? 'ring-4 ring-opacity-50 ring-blue-400 scale-105 shadow-md' : ''} ${isPortalIn || isPortalOut ? 'border-dashed border-[3px]' : ''}`} style={customStyle} />
                       
-                      <div 
-                        className={`absolute -top-3 left-1/2 -translate-x-1/2 w-4 h-4 bg-gray-300 border-2 border-white rounded-full ${mode === 'edit' ? 'hover:bg-blue-500 hover:scale-125 cursor-crosshair' : 'hidden'} transition-all z-20`}
-                        onMouseDown={(e) => onPortMouseDown(e, node.id, 'top')}
-                        onMouseUp={(e) => onPortMouseUp(e, node.id, 'top')}
-                      />
-
                       <div className={`absolute inset-0 flex items-center justify-center px-4 pointer-events-none ${nodeDef.contentClass || ''}`}>
                         <div className={`flex items-center space-x-2 ${isSelected ? 'scale-105' : ''} transition-transform`}>
-                          <i 
-                            className={`fa-solid ${nodeDef.iconClass} opacity-70 w-4 text-center`} 
-                            style={customColor ? { color: customColor } : {}}
-                          ></i>
-                          <div 
-                            className="font-bold text-sm truncate max-w-[120px]"
-                            style={customColor ? { color: customColor } : {}}
-                          >
-                            {node.data.label}
-                          </div>
+                          {isPortalIn ? (
+                            <i className="fa-solid fa-door-open opacity-80 text-purple-500 w-4 text-center"></i>
+                          ) : isPortalOut ? (
+                            <i className="fa-solid fa-person-through-window opacity-80 text-purple-500 w-4 text-center"></i>
+                          ) : (
+                            <i className={`fa-solid ${nodeDef.iconClass} opacity-70 w-4 text-center`} style={customColor ? { color: customColor } : {}}></i>
+                          )}
+                          <div className="font-bold text-sm truncate max-w-[120px]" style={customColor ? { color: customColor } : {}}>{node.data.label}</div>
                         </div>
                       </div>
 
-                      <div 
-                        className={`absolute -bottom-3 left-1/2 -translate-x-1/2 w-4 h-4 bg-gray-300 border-2 border-white rounded-full ${mode === 'edit' ? 'hover:bg-blue-500 hover:scale-125 cursor-crosshair' : 'hidden'} transition-all z-20`}
-                        onMouseDown={(e) => onPortMouseDown(e, node.id, 'bottom')}
-                        onMouseUp={(e) => onPortMouseUp(e, node.id, 'bottom')}
-                      />
+                      {!isPortalIn && (
+                        <div className={`absolute -bottom-3 left-1/2 -translate-x-1/2 w-4 h-4 bg-gray-300 border-2 border-white rounded-full ${mode === 'edit' ? 'hover:bg-blue-500 hover:scale-125 cursor-crosshair' : 'hidden'} transition-all z-20`} onMouseDown={(e) => onPortMouseDown(e, node.id, 'bottom')} onMouseUp={(e) => onPortMouseUp(e, node.id, 'bottom')} />
+                      )}
                     </div>
                   );
                 })}
               </div>
-
-              {contextMenu && mode === 'edit' && (
-                <div 
-                  className="context-menu absolute bg-white border border-gray-200 rounded-lg shadow-xl py-1 z-50 w-40 overflow-hidden"
-                  style={{ top: contextMenu.top, left: contextMenu.left }}
-                  onMouseDown={(e) => e.stopPropagation()}
-                  onContextMenu={(e) => e.preventDefault()}
-                >
-                  {contextMenu.type === 'canvas' && (
-                    <button
-                      onMouseDown={(e) => { e.stopPropagation(); handleContextMenuAction('paste'); }}
-                      disabled={!clipboard}
-                      className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center transition-colors disabled:opacity-40 disabled:hover:bg-white disabled:cursor-not-allowed"
-                    >
-                      <i className="fa-solid fa-paste mr-2"></i> {t.paste}
-                    </button>
-                  )}
-                  {contextMenu.type === 'node' && (
-                    <>
-                      <button onMouseDown={(e) => { e.stopPropagation(); handleContextMenuAction('copy'); }} className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center transition-colors">
-                        <i className="fa-solid fa-copy mr-2"></i> {t.copy}
-                      </button>
-                      <button onMouseDown={(e) => { e.stopPropagation(); handleContextMenuAction('cut'); }} className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center transition-colors">
-                        <i className="fa-solid fa-cut mr-2"></i> {t.cut}
-                      </button>
-                      <div className="border-t border-gray-100 my-1"></div>
-                    </>
-                  )}
-                  {(contextMenu.type === 'node' || contextMenu.type === 'edge') && (
-                    <button onMouseDown={(e) => { e.stopPropagation(); handleContextMenuAction('delete'); }} className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center transition-colors">
-                      <i className="fa-solid fa-trash mr-2"></i> {t.delete}
-                    </button>
-                  )}
-                </div>
-              )}
             </main>
 
             <aside className={`w-80 bg-white border-l border-gray-200 p-6 flex flex-col z-20 shadow-[-4px_0_24px_rgba(0,0,0,0.02)] transition-transform duration-300 absolute right-0 h-full ${selectedNode ? 'translate-x-0' : 'translate-x-full'}`}>
               {selectedNode && (
                 <>
                   <div className="flex items-center justify-between mb-6 pb-4 border-b border-gray-100">
-                    <h2 className="text-sm font-bold text-gray-800 uppercase tracking-wider flex items-center">
-                      <i className="fa-solid fa-gear mr-2 text-blue-500"></i> {t.properties}
-                    </h2>
-                    <button onClick={() => setSelectedNodeId(null)} className="p-1 text-gray-400 hover:text-gray-600 rounded-md hover:bg-gray-100 transition-colors">
-                      <i className="fa-solid fa-xmark"></i>
-                    </button>
+                    <h2 className="text-sm font-bold text-gray-800 uppercase tracking-wider flex items-center"><i className="fa-solid fa-gear mr-2 text-blue-500"></i> {t.properties}</h2>
+                    <button onClick={() => setSelectedNodeId(null)} className="p-1 text-gray-400 hover:text-gray-600 rounded-md hover:bg-gray-100 transition-colors"><i className="fa-solid fa-xmark"></i></button>
                   </div>
 
                   <div className="space-y-5">
                     <div>
                       <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase">{t.nodeLabel}</label>
-                      {mode === 'edit' ? (
-                        <input type="text" value={selectedNode.data.label} onChange={(e) => updateNodeData(selectedNode.id, 'label', e.target.value)} className="w-full px-3 py-2 bg-gray-50 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
-                      ) : (
-                        <div className="w-full px-3 py-2 bg-gray-50 border border-transparent rounded-lg text-sm text-gray-800 font-medium">{selectedNode.data.label}</div>
-                      )}
+                      <input type="text" value={selectedNode.data.label} onChange={(e) => updateNodeData(selectedNode.id, 'label', e.target.value)} disabled={selectedNode.data.isPortalIn} className="w-full px-3 py-2 bg-gray-50 border border-gray-300 rounded-lg text-sm disabled:opacity-50" />
                     </div>
 
-                    <div>
-                      <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase">{t.description}</label>
-                      {mode === 'edit' ? (
-                        <textarea value={selectedNode.data.description || ''} onChange={(e) => updateNodeData(selectedNode.id, 'description', e.target.value)} rows={4} className="w-full px-3 py-2 bg-gray-50 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all resize-none" />
-                      ) : (
-                        <div className="w-full px-3 py-2 bg-gray-50 border border-transparent rounded-lg text-sm text-gray-700 whitespace-pre-wrap min-h-[6rem]">{selectedNode.data.description || <span className="text-gray-400 italic">{t.noDesc}</span>}</div>
-                      )}
-                    </div>
-                    
                     <div className="pt-4 mt-4 border-t border-gray-100">
                       <label className="block text-xs font-semibold text-gray-500 mb-2 uppercase">自訂顏色</label>
                       <div className="flex items-center space-x-3">
-                        <input 
-                          type="color" 
-                          value={selectedNode.data.color || '#94a3b8'} 
-                          onChange={(e) => updateNodeData(selectedNode.id, 'color', e.target.value)}
-                          className="w-8 h-8 rounded border-0 cursor-pointer bg-transparent"
-                          disabled={mode !== 'edit'}
-                        />
+                        <input type="color" value={selectedNode.data.color || '#94a3b8'} onChange={(e) => updateNodeData(selectedNode.id, 'color', e.target.value)} className="w-8 h-8 rounded border-0 cursor-pointer bg-transparent" disabled={mode !== 'edit'} />
                         {mode === 'edit' && (
-                          <button 
-                            onClick={() => applyColorToBranch(selectedNode.id, selectedNode.data.color || '#94a3b8')}
-                            className="flex-1 px-3 py-1.5 text-xs font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors text-left"
-                          >
-                            <i className="fa-solid fa-sitemap mr-1"></i> 套用至所有分支子節點
-                          </button>
+                          <button onClick={() => applyColorToBranch(selectedNode.id, selectedNode.data.color || '#94a3b8')} className="flex-1 px-3 py-1.5 text-xs font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors text-left"><i className="fa-solid fa-sitemap mr-1"></i> 套用至所有分支</button>
                         )}
                       </div>
                     </div>
 
                     <div className="pt-4 mt-4 border-t border-gray-100">
-                       <div className="text-xs text-gray-400 flex items-center justify-between">
-                         <span>{t.nodeId}</span>
-                         <span className="font-mono bg-gray-100 px-2 py-0.5 rounded truncate max-w-[150px]">{selectedNode.id}</span>
-                       </div>
-                       <div className="text-xs text-gray-400 flex items-center justify-between mt-2">
-                         <span>{t.type}</span>
-                         <span className="capitalize">{selectedNode.data.nodeType}</span>
-                       </div>
+                      <label className="block text-xs font-semibold text-gray-500 mb-2 uppercase">排版進階選項</label>
+                      {selectedNode.data.isPortalIn ? (
+                        <p className="text-xs text-purple-600 bg-purple-50 p-2 rounded border border-purple-100"><i className="fa-solid fa-circle-info mr-1"></i> 這是一個傳送門接收端，如需操作請點擊原始節點。</p>
+                      ) : (
+                        <button onClick={() => togglePortal(selectedNode.id)} className={`w-full px-3 py-2 text-sm font-medium rounded-lg border transition-all ${selectedNode.data.isPortalOut ? 'bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}`}>
+                          <i className={`fa-solid ${selectedNode.data.isPortalOut ? 'fa-link-slash' : 'fa-person-through-window'} mr-2`}></i> 
+                          {selectedNode.data.isPortalOut ? '關閉傳送門 (接回本體)' : '分離為子區塊 (傳送門)'}
+                        </button>
+                      )}
+                      <p className="text-[10px] text-gray-400 mt-2 leading-relaxed">將擁擠的子節點切斷，獨立放置在畫布其他區域，適合整理過於龐大的樹狀結構。</p>
                     </div>
+
                   </div>
                 </>
               )}
