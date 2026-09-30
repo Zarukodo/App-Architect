@@ -735,7 +735,11 @@
                   return (
                     <div key={node.id} className={`canvas-element absolute group ${mode === 'edit' ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} transition-shadow`} style={{ left: node.x, top: node.y, width: NODE_WIDTH, height: NODE_HEIGHT }} onMouseDown={(e) => onNodeMouseDown(e, node)} onContextMenu={(e) => onNodeContextMenu(e, node)}>
                       <div className={`absolute inset-0 border-2 shadow-sm transition-all ${!customColor ? nodeDef.color : ''} ${!customColor ? 'bg-white' : ''} ${nodeDef.shapeClass || 'rounded-xl'} ${isSelected ? 'ring-4 ring-opacity-50 ring-blue-400 scale-105 shadow-md' : ''} ${isPortalIn || isPortalOut ? 'border-dashed border-[3px]' : ''}`} style={customStyle} />
-                      
+                      <div 
+                        className={`absolute -top-3 left-1/2 -translate-x-1/2 w-4 h-4 bg-gray-300 border-2 border-white rounded-full ${mode === 'edit' ? 'hover:bg-blue-500 hover:scale-125 cursor-crosshair' : 'hidden'} transition-all z-20`}
+                        onMouseDown={(e) => onPortMouseDown(e, node.id, 'top')}
+                        onMouseUp={(e) => onPortMouseUp(e, node.id, 'top')}
+                      />
                       <div className={`absolute inset-0 flex items-center justify-center px-4 pointer-events-none ${nodeDef.contentClass || ''}`}>
                         <div className={`flex items-center space-x-2 ${isSelected ? 'scale-105' : ''} transition-transform`}>
                           {isPortalIn ? (
