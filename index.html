@@ -7,6 +7,8 @@
   
   <!-- Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Dagre for Auto Layout -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/dagre/0.8.5/dagre.min.js"></script>
   
   <!-- FontAwesome for Icons -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -363,71 +365,55 @@
       };
 
       const handleAutoLayout = () => {
-        const targets = new Set(edges.map(e => e.target));
-        // 防呆：如果網域內產生迴圈，會找不到 root。改為優先找無人指向的，其次找起點，再沒有就抓第一個
-        let roots = nodes.filter(n => !targets.has(n.id));
-        if (roots.length === 0) roots = nodes.filter(n => n.data.nodeType === 'terminal');
-        if (roots.length === 0 && nodes.length > 0) roots = [nodes[0]];
+        if (nodes.length === 0) return;
+
+        // 1. 建立一個有向圖物件
+        const g = new dagre.graphlib.Graph();
         
-        const levels = {};
-        const visited = new Set();
-        const queue = roots.map(r => ({ id: r.id, level: 0 }));
-        
-        while (queue.length > 0) {
-          const curr = queue.shift();
-          if (!visited.has(curr.id)) {
-            visited.add(curr.id);
-            if (!levels[curr.level]) levels[curr.level] = [];
-            levels[curr.level].push(curr.id);
-            
-            const children = edges
-              .filter(e => e.source === curr.id)
-              .map(e => ({ id: e.target, level: curr.level + 1 }));
-            queue.push(...children);
-          }
-        }
-        
-        // 處理沒有連線的孤兒節點
-        nodes.forEach(n => {
-          if (!visited.has(n.id)) {
-            if (!levels[0]) levels[0] = [];
-            levels[0].push(n.id);
-            visited.add(n.id);
-          }
+        // 設定圖形的整體佈局參數
+        g.setGraph({
+          rankdir: 'TB', // 從上到下 (Top to Bottom)
+          nodesep: 80,   // 同層節點之間的水平間距
+          ranksep: 120,  // 層級與層級之間的垂直間距
+          marginx: 50,
+          marginy: 50
+        });
+        g.setDefaultEdgeLabel(() => ({}));
+
+        // 2. 將節點餵給 Dagre
+        // 注意：必須告訴它節點的長寬，它才能幫你算好避讓空間
+        nodes.forEach(node => {
+          g.setNode(node.id, { width: NODE_WIDTH, height: NODE_HEIGHT });
         });
 
-        const nodeSpacingWidth = NODE_WIDTH + 80;  // 加大左右間距
-        const nodeSpacingHeight = NODE_HEIGHT + 120; // 加大上下間距
-        const centerX = 500; // 視窗中心基準
-        
-        const newNodes = [...nodes];
-        Object.keys(levels).forEach(levelStr => {
-          const level = parseInt(levelStr);
-          const levelNodes = levels[levelStr];
-          
-          // 計算這層總寬度，確保每一層都水平置中展開
-          const totalWidth = levelNodes.length * nodeSpacingWidth - 80;
-          let startX = centerX - (totalWidth / 2);
-
-          levelNodes.forEach((nodeId) => {
-            const nodeIndex = newNodes.findIndex(n => n.id === nodeId);
-            if (nodeIndex !== -1) {
-              newNodes[nodeIndex] = {
-                ...newNodes[nodeIndex],
-                x: startX,
-                y: level * nodeSpacingHeight + 80
-              };
-            }
-            startX += nodeSpacingWidth;
-          });
+        // 3. 將連線餵給 Dagre
+        edges.forEach(edge => {
+          g.setEdge(edge.source, edge.target);
         });
 
+        // 4. 讓 Dagre 施展魔法，計算所有節點的座標
+        dagre.layout(g);
+
+        // 5. 把 Dagre 算出來的座標套用回我們的 nodes 狀態
+        const centerX = 400; // 給個初始的水平偏移量，避免太靠左邊緣
+        
+        const newNodes = nodes.map(node => {
+          const nodeWithPos = g.node(node.id);
+          return {
+            ...node,
+            // 關鍵：Dagre 算出的 x, y 是「節點中心點」，但我們 div 渲染是用「左上角」
+            // 所以必須減去長寬的一半，把座標校正回左上角
+            x: nodeWithPos.x - NODE_WIDTH / 2 + centerX, 
+            y: nodeWithPos.y - NODE_HEIGHT / 2 + 100
+          };
+        });
+
+        // 6. 更新狀態
         setNodes(newNodes);
-        setTransform({ x: 0, y: 0, scale: 1 });
+        setTransform({ x: 0, y: 0, scale: 1 }); // 排版完把視角歸位
         showToast(t.layoutOrganized);
         syncToCloud(newNodes, edges);
       };
-
       const onCanvasContextMenu = (e) => {
         e.preventDefault();
         if (mode === 'view') return;
