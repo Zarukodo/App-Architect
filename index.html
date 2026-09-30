@@ -192,9 +192,17 @@
       const [layoutMode, setLayoutMode] = useState('tree');
       
       const [selectedNodeId, setSelectedNodeId] = useState(null);
+      const [selectedEdgeId, setSelectedEdgeId] = useState(null); // 補上這行！
+
       const [contextMenu, setContextMenu] = useState(null);
       const [clipboard, setClipboard] = useState(null); 
       const [toastMessage, setToastMessage] = useState(null);
+
+      const updateEdgeStyle = (id, field, value) => {
+        const newEdges = edges.map(edge => edge.id === id ? { ...edge, [field]: value } : edge);
+        setEdges(newEdges);
+        syncToCloud(nodes, newEdges);
+      };
       
       const [transform, setTransform] = useState({ x: 0, y: 0, scale: 1 });
       const canvasRef = useRef(null);
@@ -239,6 +247,7 @@
         if (e.button !== 0) return;
         if (e.target.closest('.canvas-element') === null && e.target.closest('.context-menu') === null) {
           setSelectedNodeId(null);
+          setSelectedEdgeId(null);
           setContextMenu(null);
           setIsPanning(true);
           setPanStart({ x: e.clientX - transform.x, y: e.clientY - transform.y });
@@ -368,6 +377,7 @@
         }
         e.stopPropagation();
         setSelectedNodeId(node.id);
+        setSelectedEdgeId(null);
         setContextMenu(null);
         setDraggingNode({ id: node.id, startX: node.x, startY: node.y, mouseX: e.clientX, mouseY: e.clientY });
       };
@@ -601,6 +611,7 @@
       };
 
       const selectedNode = nodes.find(n => n.id === selectedNodeId);
+      const selectedEdge = edges.find(e => e.id === selectedEdgeId);
 
       return (
         <div className="flex flex-col h-screen w-full bg-gray-50 text-gray-800 font-sans overflow-hidden">
@@ -709,15 +720,42 @@
                     const totalSiblings = siblingEdges.length;
                     const offsetY = totalSiblings > 1 ? (siblingIndex - (totalSiblings - 1) / 2) * 12 : 0;
 
-                    const isLongDistance = Math.abs(targetNode.y - sourceNode.y) > (NODE_HEIGHT + 150);
-                    const strokeColor = edge.color ? edge.color : (isLongDistance ? "#cbd5e1" : "#94a3b8");
-                    const strokeWidth = isLongDistance ? "2" : "3";
-                    const strokeDash = isLongDistance ? "6,6" : "none";
+                    const strokeColor = edge.color || "#94a3b8";
+                    const thickness = edge.thickness || "3";
+                    const arrowDir = edge.arrowDir || "forward"; // forward, backward, both, none
 
                     return (
                       <g key={edge.id}>
-                        <path d={layoutMode === 'tree' ? getStepPath(startX, startY, endX, endY, isBackward, offsetY) : getBezierPath(startX, startY, endX, endY, isBackward)} fill="none" stroke={strokeColor} strokeWidth={strokeWidth} strokeDasharray={strokeDash} markerEnd={`url(#arrow-${edge.id})`} className="transition-all duration-300 pointer-events-auto cursor-pointer hover:stroke-blue-400" onContextMenu={(e) => onEdgeContextMenu(e, edge)} />
-                        <defs><marker id={`arrow-${edge.id}`} viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill={strokeColor} /></marker></defs>
+                        {/* 1. 隱形判定區：透明、寬度24px，專門用來抓滑鼠點擊 */}
+                        <path 
+                          d={layoutMode === 'tree' ? getStepPath(startX, startY, endX, endY, isBackward, offsetY) : getBezierPath(startX, startY, endX, endY, isBackward)}
+                          fill="none"
+                          stroke="transparent"
+                          strokeWidth="24"
+                          className="pointer-events-auto cursor-pointer"
+                          onContextMenu={(e) => onEdgeContextMenu(e, edge)}
+                          onMouseDown={(e) => { e.stopPropagation(); setSelectedEdgeId(edge.id); setSelectedNodeId(null); }}
+                        />
+                        
+                        {/* 2. 實際顯示的視覺線 */}
+                        <path 
+                          d={layoutMode === 'tree' ? getStepPath(startX, startY, endX, endY, isBackward, offsetY) : getBezierPath(startX, startY, endX, endY, isBackward)}
+                          fill="none"
+                          stroke={strokeColor}
+                          strokeWidth={thickness}
+                          markerEnd={(arrowDir === 'forward' || arrowDir === 'both') ? `url(#arrow-end-${edge.id})` : ''}
+                          markerStart={(arrowDir === 'backward' || arrowDir === 'both') ? `url(#arrow-start-${edge.id})` : ''}
+                          className="pointer-events-none transition-all duration-300"
+                        />
+                        <defs>
+                          <marker id={`arrow-end-${edge.id}`} viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                            <path d="M 0 0 L 10 5 L 0 10 z" fill={strokeColor} />
+                          </marker>
+                          {/* 逆向箭頭 */}
+                          <marker id={`arrow-start-${edge.id}`} viewBox="0 0 10 10" refX="2" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+                            <path d="M 10 0 L 0 5 L 10 10 z" fill={strokeColor} />
+                          </marker>
+                        </defs>
                       </g>
                     );
                   })}
@@ -807,44 +845,76 @@
               )}
             </main>
 
-            <aside className={`w-80 bg-white border-l border-gray-200 p-6 flex flex-col z-20 shadow-[-4px_0_24px_rgba(0,0,0,0.02)] transition-transform duration-300 absolute right-0 h-full ${selectedNode ? 'translate-x-0' : 'translate-x-full'}`}>
-              {selectedNode && (
+            <aside className={`w-80 bg-white border-l border-gray-200 p-6 flex flex-col z-20 shadow-[-4px_0_24px_rgba(0,0,0,0.02)] transition-transform duration-300 absolute right-0 h-full ${selectedNode || selectedEdge ? 'translate-x-0' : 'translate-x-full'}`}>
+              {(selectedNode || selectedEdge) && (
                 <>
                   <div className="flex items-center justify-between mb-6 pb-4 border-b border-gray-100">
-                    <h2 className="text-sm font-bold text-gray-800 uppercase tracking-wider flex items-center"><i className="fa-solid fa-gear mr-2 text-blue-500"></i> {t.properties}</h2>
-                    <button onClick={() => setSelectedNodeId(null)} className="p-1 text-gray-400 hover:text-gray-600 rounded-md hover:bg-gray-100 transition-colors"><i className="fa-solid fa-xmark"></i></button>
+                    <h2 className="text-sm font-bold text-gray-800 uppercase tracking-wider flex items-center">
+                      <i className="fa-solid fa-gear mr-2 text-blue-500"></i> {selectedNode ? t.properties : '連線屬性設定'}
+                    </h2>
+                    <button onClick={() => { setSelectedNodeId(null); setSelectedEdgeId(null); }} className="p-1 text-gray-400 hover:text-gray-600 rounded-md hover:bg-gray-100 transition-colors">
+                      <i className="fa-solid fa-xmark"></i>
+                    </button>
                   </div>
+                  {selectedNode && (
+                     // 這裡放你原本所有處理 selectedNode 的 UI (包含名稱、描述、自訂顏色、傳送門按鈕等)
+                     <div className="space-y-5">
+                        <div>
+                          <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase">{t.nodeLabel}</label>
+                          <input type="text" value={selectedNode.data.label} onChange={(e) => updateNodeData(selectedNode.id, 'label', e.target.value)} disabled={selectedNode.data.isPortalIn} className="w-full px-3 py-2 bg-gray-50 border border-gray-300 rounded-lg text-sm disabled:opacity-50" />
+                        </div>
 
-                  <div className="space-y-5">
-                    <div>
-                      <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase">{t.nodeLabel}</label>
-                      <input type="text" value={selectedNode.data.label} onChange={(e) => updateNodeData(selectedNode.id, 'label', e.target.value)} disabled={selectedNode.data.isPortalIn} className="w-full px-3 py-2 bg-gray-50 border border-gray-300 rounded-lg text-sm disabled:opacity-50" />
-                    </div>
+                        <div className="pt-4 mt-4 border-t border-gray-100">
+                          <label className="block text-xs font-semibold text-gray-500 mb-2 uppercase">自訂顏色</label>
+                          <div className="flex items-center space-x-3">
+                            <input type="color" value={selectedNode.data.color || '#94a3b8'} onChange={(e) => updateNodeData(selectedNode.id, 'color', e.target.value)} className="w-8 h-8 rounded border-0 cursor-pointer bg-transparent" disabled={mode !== 'edit'} />
+                            {mode === 'edit' && (
+                              <button onClick={() => applyColorToBranch(selectedNode.id, selectedNode.data.color || '#94a3b8')} className="flex-1 px-3 py-1.5 text-xs font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors text-left"><i className="fa-solid fa-sitemap mr-1"></i> 套用至所有分支</button>
+                            )}
+                          </div>
+                        </div>
 
-                    <div className="pt-4 mt-4 border-t border-gray-100">
-                      <label className="block text-xs font-semibold text-gray-500 mb-2 uppercase">自訂顏色</label>
-                      <div className="flex items-center space-x-3">
-                        <input type="color" value={selectedNode.data.color || '#94a3b8'} onChange={(e) => updateNodeData(selectedNode.id, 'color', e.target.value)} className="w-8 h-8 rounded border-0 cursor-pointer bg-transparent" disabled={mode !== 'edit'} />
-                        {mode === 'edit' && (
-                          <button onClick={() => applyColorToBranch(selectedNode.id, selectedNode.data.color || '#94a3b8')} className="flex-1 px-3 py-1.5 text-xs font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors text-left"><i className="fa-solid fa-sitemap mr-1"></i> 套用至所有分支</button>
-                        )}
+                        <div className="pt-4 mt-4 border-t border-gray-100">
+                          <label className="block text-xs font-semibold text-gray-500 mb-2 uppercase">排版進階選項</label>
+                          {selectedNode.data.isPortalIn ? (
+                            <p className="text-xs text-purple-600 bg-purple-50 p-2 rounded border border-purple-100"><i className="fa-solid fa-circle-info mr-1"></i> 這是一個傳送門接收端，如需操作請點擊原始節點。</p>
+                          ) : (
+                            <button onClick={() => togglePortal(selectedNode.id)} className={`w-full px-3 py-2 text-sm font-medium rounded-lg border transition-all ${selectedNode.data.isPortalOut ? 'bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}`}>
+                              <i className={`fa-solid ${selectedNode.data.isPortalOut ? 'fa-link-slash' : 'fa-person-through-window'} mr-2`}></i> 
+                              {selectedNode.data.isPortalOut ? '關閉傳送門 (接回本體)' : '分離為子區塊 (傳送門)'}
+                            </button>
+                          )}
+                          <p className="text-[10px] text-gray-400 mt-2 leading-relaxed">將擁擠的子節點切斷，獨立放置在畫布其他區域，適合整理過於龐大的樹狀結構。</p>
+                        </div>
+
+                      </div>
+                  )}
+
+                  {/* ---------- 若選中的是「連線」 ---------- */}
+                  {selectedEdge && (
+                    <div className="space-y-5">
+                      <div>
+                        <label className="block text-xs font-semibold text-gray-500 mb-2 uppercase">線條粗細</label>
+                        <input type="range" min="1" max="10" value={selectedEdge.thickness || "3"} onChange={(e) => updateEdgeStyle(selectedEdge.id, 'thickness', e.target.value)} className="w-full cursor-pointer" disabled={mode !== 'edit'} />
+                        <div className="text-xs text-right text-gray-500 mt-1">{selectedEdge.thickness || "3"} px</div>
+                      </div>
+                      
+                      <div className="pt-2 border-t border-gray-100">
+                        <label className="block text-xs font-semibold text-gray-500 mb-2 uppercase">箭頭方向</label>
+                        <select value={selectedEdge.arrowDir || "forward"} onChange={(e) => updateEdgeStyle(selectedEdge.id, 'arrowDir', e.target.value)} className="w-full px-3 py-2 bg-gray-50 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" disabled={mode !== 'edit'}>
+                          <option value="forward">單向向下 (預設)</option>
+                          <option value="backward">單向向上</option>
+                          <option value="both">雙向箭頭</option>
+                          <option value="none">無箭頭 (純線條)</option>
+                        </select>
+                      </div>
+
+                      <div className="pt-4 border-t border-gray-100">
+                        <label className="block text-xs font-semibold text-gray-500 mb-2 uppercase">線條顏色</label>
+                        <input type="color" value={selectedEdge.color || '#94a3b8'} onChange={(e) => updateEdgeStyle(selectedEdge.id, 'color', e.target.value)} className="w-8 h-8 rounded border-0 cursor-pointer bg-transparent" disabled={mode !== 'edit'} />
                       </div>
                     </div>
-
-                    <div className="pt-4 mt-4 border-t border-gray-100">
-                      <label className="block text-xs font-semibold text-gray-500 mb-2 uppercase">排版進階選項</label>
-                      {selectedNode.data.isPortalIn ? (
-                        <p className="text-xs text-purple-600 bg-purple-50 p-2 rounded border border-purple-100"><i className="fa-solid fa-circle-info mr-1"></i> 這是一個傳送門接收端，如需操作請點擊原始節點。</p>
-                      ) : (
-                        <button onClick={() => togglePortal(selectedNode.id)} className={`w-full px-3 py-2 text-sm font-medium rounded-lg border transition-all ${selectedNode.data.isPortalOut ? 'bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}`}>
-                          <i className={`fa-solid ${selectedNode.data.isPortalOut ? 'fa-link-slash' : 'fa-person-through-window'} mr-2`}></i> 
-                          {selectedNode.data.isPortalOut ? '關閉傳送門 (接回本體)' : '分離為子區塊 (傳送門)'}
-                        </button>
-                      )}
-                      <p className="text-[10px] text-gray-400 mt-2 leading-relaxed">將擁擠的子節點切斷，獨立放置在畫布其他區域，適合整理過於龐大的樹狀結構。</p>
-                    </div>
-
-                  </div>
+                  )}
                 </>
               )}
             </aside>
